@@ -1,0 +1,39 @@
+[package]
+name = "madcad"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "HTTP API for Fidget: Rhai scripting, point evaluation, rasterization and STL export"
+license = "MPL-2.0"
+publish = false
+
+[dependencies]
+fidget = { version = "=0.5.0", default-features = false, features = ["jit", "mesh", "raster", "rhai", "shapes"] }
+rhai = { version = "1.24", features = ["sync"] }
+nalgebra = "0.35"
+rayon = "1.10"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "macros", "tokio", "tracing"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower = { version = "0.5", features = ["limit", "load-shed", "timeout", "util"] }
+tower-http = { version = "0.6", features = ["catch-panic", "limit", "request-id", "sensitive-headers", "set-header", "timeout", "trace", "util"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Keep unwinding so a panic inside a render job is contained to one request.
+panic = "unwind"
+overflow-checks = true
