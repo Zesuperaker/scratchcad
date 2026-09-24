@@ -344,9 +344,172 @@ impl ShapeJob for MeshJob<'_> {
 /// Encodes RGBA8 pixels as a PNG
 pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, ApiError> {
     use image::{ImageEncoder, codecs::png::PngEncoder};
+    // The encoder panics on a size mismatch; report it as an error instead.
+    let expected = width as usize * height as usize * 4;
+    if rgba.len() != expected {
+        return Err(ApiError::Internal(format!(
+            "encoding PNG: expected {expected} bytes for {width}x{height}, got {}",
+            rgba.len()
+        )));
+    }
     let mut out = Vec::new();
     PngEncoder::new(&mut out)
         .write_image(rgba, width, height, image::ExtendedColorType::Rgba8)
         .map_err(|e| ApiError::Internal(format!("encoding PNG: {e}")))?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::script::{ScriptLimits, compile};
+
+    fn shape(src: &str) -> Compiled {
+        let limits = ScriptLimits {
+            max_operations: 100_000,
+            max_nodes: 10_000,
+            max_string_size: 4096,
+        };
+        compile(src, &limits, &CancelToken::new()).unwrap()
+    }
+
+    fn cancelled() -> CancelToken {
+        let c = CancelToken::new();
+        c.cancel();
+        c
+    }
+
+    const SPHERE: &str = "sqrt(x*x + y*y + z*z) - 0.5";
+
+    #[test]
+    fn jit_and_vm_agree() {
+        let c = shape(SPHERE);
+        let pts: Vec<[f32; 3]> = (0..100)
+            .map(|i| [i as f32 / 50.0 - 1.0, 0.25, -0.1])
+            .collect();
+        let jit = dispatch(Evaluator::Jit, &c, PointEval(pts.clone())).unwrap();
+        let vm = dispatch(Evaluator::Vm, &c, PointEval(pts.clone())).unwrap();
+        for (a, b) in jit.iter().zip(&vm) {
+            assert!((a - b).abs() < 1e-5);
+        }
+        let g = dispatch(Evaluator::Vm, &c, GradEval(pts)).unwrap();
+        for (g, v) in g.iter().zip(&vm) {
+            assert!((g.v - v).abs() < 1e-5);
+            // Gradient of a distance field has unit length
+            let n = (g.dx * g.dx + g.dy * g.dy + g.dz * g.dz).sqrt();
+            assert!((n - 1.0).abs() < 1e-3, "{n}");
+        }
+    }
+
+    #[test]
+    fn interval_bounds_contain_samples() {
+        let c = shape(SPHERE);
+        let boxes = vec![[[-1.0, 1.0]; 3], [[0.9, 1.0], [0.0, 0.1], [0.0, 0.1]]];
+        let out = dispatch(Evaluator::Jit, &c, IntervalEval(boxes)).unwrap();
+        // Box around the origin straddles the surface; the far box is outside
+        assert!(out[0][0] < 0.0 && out[0][1] > 0.0);
+        assert!(out[1][0] > 0.0);
+    }
+
+    #[test]
+    fn cancelled_jobs_return_timeout() {
+        let c = shape(SPHERE);
+        let pool = ThreadPool::Global;
+        let r = dispatch(
+            Evaluator::Vm,
+            &c,
+            Raster2d {
+                size: ImageSize::new(64, 64),
+                mode: Mode2d::Mono,
+                world_to_model: Matrix3::identity(),
+                pool: &pool,
+                cancel: cancelled(),
+            },
+        );
+        assert!(matches!(r, Err(ApiError::Timeout)));
+        let r = dispatch(
+            Evaluator::Vm,
+            &c,
+            Raster3d {
+                size: VoxelSize::new(64, 64, 64),
+                mode: Mode3d::Shaded,
+                denoise: true,
+                ssao: false,
+                world_to_model: Matrix4::identity(),
+                pool: &pool,
+                cancel: cancelled(),
+            },
+        );
+        assert!(matches!(r, Err(ApiError::Timeout)));
+        let r = dispatch(
+            Evaluator::Vm,
+            &c,
+            MeshJob {
+                depth: 5,
+                world_to_model: Matrix4::identity(),
+                max_triangles: usize::MAX,
+                pool: &pool,
+                cancel: cancelled(),
+            },
+        );
+        assert!(matches!(r, Err(ApiError::Timeout)));
+    }
+
+    #[test]
+    fn heightmap_is_brighter_nearer_the_viewer() {
+        let c = shape(SPHERE);
+        let pool = ThreadPool::Global;
+        let rgba = dispatch(
+            Evaluator::Jit,
+            &c,
+            Raster3d {
+                size: VoxelSize::new(32, 32, 32),
+                mode: Mode3d::Heightmap,
+                denoise: false,
+                ssao: false,
+                world_to_model: Matrix4::identity(),
+                pool: &pool,
+                cancel: CancelToken::new(),
+            },
+        )
+        .unwrap();
+        let px = |x: usize, y: usize| &rgba[(y * 32 + x) * 4..][..4];
+        // The sphere's front (center) is the highest point: full brightness
+        assert_eq!(px(16, 16), [255, 255, 255, 255]);
+        assert!(px(16, 16)[0] > px(16, 7)[0]);
+        assert_eq!(px(0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn mesh_counts_match_stl() {
+        let c = shape(SPHERE);
+        let out = dispatch(
+            Evaluator::Jit,
+            &c,
+            MeshJob {
+                depth: 4,
+                world_to_model: Matrix4::identity(),
+                max_triangles: usize::MAX,
+                pool: &ThreadPool::Global,
+                cancel: CancelToken::new(),
+            },
+        )
+        .unwrap();
+        assert!(out.triangles > 0 && out.vertices > 0);
+        assert_eq!(out.bytes.len(), 84 + 50 * out.triangles);
+    }
+
+    #[test]
+    fn png_round_trip() {
+        let rgba: Vec<u8> = (0..3 * 2 * 4).map(|i| i as u8 * 10).collect();
+        let png = encode_png(&rgba, 3, 2).unwrap();
+        let img = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), (3, 2));
+        assert_eq!(img.into_raw(), rgba);
+        // Mismatched buffer size is an error, not a panic
+        assert!(matches!(
+            encode_png(&rgba, 4, 4),
+            Err(ApiError::Internal(_))
+        ));
+    }
 }

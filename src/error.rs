@@ -29,7 +29,7 @@ pub enum ApiError {
     #[error("request body too large")]
     PayloadTooLarge,
 
-    #[error("script not found")]
+    #[error("not found")]
     NotFound,
 
     #[error("missing or invalid bearer token")]
@@ -123,3 +123,55 @@ impl From<JsonRejection> for ApiError {
 #[derive(axum::extract::FromRequest)]
 #[from_request(via(axum::Json), rejection(ApiError))]
 pub struct ApiJson<T>(pub T);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn render(e: ApiError) -> (StatusCode, axum::http::HeaderMap, serde_json::Value) {
+        let res = e.into_response();
+        let (parts, body) = res.into_parts();
+        let bytes = to_bytes(body, usize::MAX).await.unwrap();
+        (
+            parts.status,
+            parts.headers,
+            serde_json::from_slice(&bytes).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn every_variant_maps_to_status_and_code() {
+        let cases = [
+            (ApiError::BadRequest("m".into()), 400, "bad_request"),
+            (ApiError::InvalidJson("m".into()), 400, "invalid_json"),
+            (ApiError::Unprocessable("m".into()), 422, "unprocessable"),
+            (ApiError::Script("m".into()), 422, "script_error"),
+            (ApiError::LimitExceeded("m".into()), 422, "limit_exceeded"),
+            (ApiError::PayloadTooLarge, 413, "payload_too_large"),
+            (ApiError::NotFound, 404, "not_found"),
+            (ApiError::Unauthorized, 401, "unauthorized"),
+            (ApiError::Overloaded, 503, "overloaded"),
+            (ApiError::Timeout, 504, "timeout"),
+            (ApiError::Internal("m".into()), 500, "internal"),
+        ];
+        for (err, status, code) in cases {
+            let (s, h, v) = render(err).await;
+            assert_eq!(s.as_u16(), status, "{code}");
+            assert_eq!(v["error"]["code"], code);
+            assert_eq!(h.contains_key(header::RETRY_AFTER), code == "overloaded");
+            assert_eq!(
+                h.contains_key(header::WWW_AUTHENTICATE),
+                code == "unauthorized"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn messages_are_passed_through_except_internal_details() {
+        let (_, _, v) = render(ApiError::Script("line 3: oops".into())).await;
+        assert_eq!(v["error"]["message"], "script error: line 3: oops");
+        let (_, _, v) = render(ApiError::Internal("secret path /etc".into())).await;
+        assert_eq!(v["error"]["message"], "internal error");
+    }
+}

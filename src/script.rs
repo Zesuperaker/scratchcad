@@ -1,12 +1,11 @@
-//! Sandboxed Rhai execution and a bounded cache of compiled scripts.
+//! Sandboxed Rhai execution.
 //!
 //! Scripts use Fidget's Rhai bindings and produce a shape either by calling
 //! `draw(shape)` exactly once or by evaluating to a shape as their final
-//! expression.  The resulting math graph is stored as a Fidget [`Context`] +
-//! root [`Node`], keyed by the SHA-256 of the script source.
+//! expression.  The resulting math graph is returned as a Fidget
+//! [`Context`] + root [`Node`]; nothing is retained between requests.
 
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -19,7 +18,6 @@ use fidget::{
     var::Var,
 };
 use rhai::{Dynamic, EvalAltResult, NativeCallContext};
-use sha2::{Digest, Sha256};
 
 use crate::error::ApiError;
 
@@ -37,7 +35,6 @@ pub struct ScriptLimits {
 
 /// A script that has been executed and reduced to a math graph
 pub struct Compiled {
-    pub id: String,
     pub ctx: Context,
     pub root: Node,
     /// Number of unique nodes in the math graph
@@ -46,22 +43,6 @@ pub struct Compiled {
     pub output: Vec<String>,
     /// Time spent executing the script, in milliseconds
     pub compile_ms: f64,
-}
-
-/// Content-addressed script identifier (lowercase hex SHA-256)
-pub fn script_id(src: &str) -> String {
-    let digest = Sha256::digest(src.as_bytes());
-    let mut s = String::with_capacity(64);
-    for b in digest {
-        use std::fmt::Write;
-        let _ = write!(s, "{b:02x}");
-    }
-    s
-}
-
-/// Returns `true` if `id` looks like something [`script_id`] would produce
-pub fn is_valid_id(id: &str) -> bool {
-    id.len() == 64 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// Builds a Rhai engine with Fidget bindings and sandbox limits applied
@@ -175,7 +156,6 @@ pub fn compile(
 
     let output = std::mem::take(&mut *output.lock().unwrap_or_else(|e| e.into_inner()));
     Ok(Compiled {
-        id: script_id(src),
         ctx,
         root,
         nodes,
@@ -216,76 +196,6 @@ fn map_eval_error(e: EvalAltResult, cancel: &CancelToken) -> ApiError {
             ApiError::LimitExceeded(format!("script exceeded the call depth limit ({pos})"))
         }
         other => ApiError::Script(other.to_string()),
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-/// Bounded least-recently-used cache of compiled scripts
-pub struct ScriptCache {
-    capacity: usize,
-    inner: Mutex<CacheInner>,
-}
-
-#[derive(Default)]
-struct CacheInner {
-    tick: u64,
-    map: HashMap<String, (Arc<Compiled>, u64)>,
-}
-
-impl ScriptCache {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            inner: Mutex::default(),
-        }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, CacheInner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    pub fn get(&self, id: &str) -> Option<Arc<Compiled>> {
-        let mut inner = self.lock();
-        inner.tick += 1;
-        let tick = inner.tick;
-        inner.map.get_mut(id).map(|(c, t)| {
-            *t = tick;
-            c.clone()
-        })
-    }
-
-    pub fn insert(&self, c: Arc<Compiled>) {
-        if self.capacity == 0 {
-            return;
-        }
-        let mut inner = self.lock();
-        inner.tick += 1;
-        let tick = inner.tick;
-        if !inner.map.contains_key(&c.id) && inner.map.len() >= self.capacity {
-            // O(n) scan; fine for the few hundred entries this cache holds.
-            if let Some(oldest) = inner
-                .map
-                .iter()
-                .min_by_key(|(_, (_, t))| *t)
-                .map(|(k, _)| k.clone())
-            {
-                inner.map.remove(&oldest);
-            }
-        }
-        inner.map.insert(c.id.clone(), (c, tick));
-    }
-
-    pub fn remove(&self, id: &str) -> bool {
-        self.lock().map.remove(id).is_some()
-    }
-
-    pub fn len(&self) -> usize {
-        self.lock().map.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 
@@ -364,19 +274,70 @@ mod tests {
     }
 
     #[test]
-    fn cache_evicts_lru() {
+    fn output_is_capped_and_truncated() {
         let c = CancelToken::new();
-        let cache = ScriptCache::new(2);
-        let a = Arc::new(compile("x", &limits(), &c).unwrap());
-        let b = Arc::new(compile("y", &limits(), &c).unwrap());
-        let z = Arc::new(compile("z", &limits(), &c).unwrap());
-        cache.insert(a.clone());
-        cache.insert(b.clone());
-        assert!(cache.get(&a.id).is_some()); // `b` is now least recent
-        cache.insert(z.clone());
-        assert!(cache.get(&b.id).is_none());
-        assert!(cache.get(&a.id).is_some());
-        assert!(cache.get(&z.id).is_some());
-        assert!(is_valid_id(&a.id));
+        let out = compile("for i in 0..150 { print(i) } x", &limits(), &c).unwrap();
+        assert_eq!(out.output.len(), MAX_OUTPUT_LINES);
+        assert_eq!(out.output[99], "99");
+
+        // Long lines are cut on a char boundary: "é" is two bytes, so 1024
+        // bytes falls exactly between characters but 1023 does not.
+        let accents = "let s = \"\"; for i in 0..600 { s += \"é\"; }";
+        let out = compile(&format!("{accents} print(s); x"), &limits(), &c).unwrap();
+        let line = &out.output[0];
+        assert!(line.ends_with('…'));
+        assert_eq!(line.len(), MAX_OUTPUT_LINE_LEN + '…'.len_utf8());
+        let out = compile(&format!("{accents} print(\"a\" + s); x"), &limits(), &c).unwrap();
+        assert_eq!(
+            out.output[0].len(),
+            MAX_OUTPUT_LINE_LEN - 1 + '…'.len_utf8()
+        );
+    }
+
+    #[test]
+    fn debug_output_includes_position() {
+        let c = CancelToken::new();
+        let out = compile("debug(\"here\"); x", &limits(), &c).unwrap();
+        assert!(
+            out.output[0].starts_with("[line 1, position 1]"),
+            "{:?}",
+            out.output
+        );
+        assert!(out.output[0].contains("here"));
+    }
+
+    #[test]
+    fn string_size_limit() {
+        let c = CancelToken::new();
+        let l = ScriptLimits {
+            max_string_size: 64,
+            ..limits()
+        };
+        let r = compile("let s = \"a\"; for i in 0..10 { s += s; } x", &l, &c);
+        assert!(matches!(r, Err(ApiError::LimitExceeded(m)) if m.contains("size")));
+    }
+
+    #[test]
+    fn free_variables_are_rejected() {
+        let mut ctx = Context::new();
+        let x = ctx.x();
+        let v = ctx.var(Var::new());
+        let root = ctx.add(x, v).unwrap();
+        assert!(matches!(
+            check_vars(&ctx, root),
+            Err(ApiError::Unprocessable(_))
+        ));
+        assert!(check_vars(&ctx, x).is_ok());
+    }
+
+    #[test]
+    fn math_constants_and_node_count() {
+        let c = CancelToken::new();
+        let base = compile("x", &limits(), &c).unwrap().nodes;
+        let out = compile("x + PI", &limits(), &c).unwrap();
+        // One node for the constant and one for the sum
+        assert_eq!(out.nodes, base + 2);
+        assert!(out.compile_ms >= 0.0);
+        assert!(out.output.is_empty());
     }
 }

@@ -4,7 +4,7 @@ A lean HTTP service built on [Fidget](https://github.com/mkeeter/fidget)
 **v0.5.0** and [axum](https://github.com/tokio-rs/axum). You send it
 [Rhai](https://rhai.rs) scripts that describe implicit surfaces, and it can:
 
-- **run and cache scripts**: `POST /v1/scripts`
+- **validate scripts**: `POST /v1/scripts/validate`
 - **evaluate** the field at points, with gradients or over interval boxes: `POST /v1/eval`
 - **rasterize** a 2D slice or a shaded 3D view to PNG: `POST /v1/raster/2d`, `POST /v1/raster/3d`
 - **export** a binary STL mesh: `POST /v1/export/stl`
@@ -25,11 +25,12 @@ A script produces its shape in one of two ways:
 - it calls `draw(shape)` exactly once, or
 - its last expression is a shape, e.g. `sqrt(x*x + y*y + z*z) - 1`.
 
-Negative values are inside the shape. Compiled scripts are content-addressed:
-`script_id` is the SHA-256 of the source. Every endpoint below takes **either**
-`"script": "<source>"` **or** `"script_id": "<id>"`. Inline scripts are cached
-as well, so sending the same source again skips the Rhai step. The cache is an
-in-memory LRU, so a `script_id` can expire. On a `404`, send the script again.
+Negative values are inside the shape.
+
+The API is **stateless**. Every request carries its script in a `"script"`
+field, and nothing is stored between requests. Any instance can serve any
+request, so replicas behind a load balancer need no coordination. Running a
+script takes about a millisecond, which is small next to rendering or meshing.
 
 Every compute endpoint also takes `"evaluator": "jit"` (the default; native
 code) or `"vm"` (the interpreter).
@@ -42,7 +43,7 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 |---|---|---|
 | 400 | `bad_request`, `invalid_json` | malformed or contradictory input (unknown fields are rejected) |
 | 401 | `unauthorized` | missing or wrong bearer token |
-| 404 | `not_found` | unknown route or `script_id` |
+| 404 | `not_found` | unknown route |
 | 413 | `payload_too_large` | body over `MADCAD_MAX_BODY_BYTES` |
 | 422 | `script_error` | Rhai parse or runtime error (message includes line and column) |
 | 422 | `limit_exceeded` | a configured limit was hit (size, operations, nodes, triangles and so on) |
@@ -53,18 +54,21 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 Every response carries an `x-request-id` header. If the request sent one, it
 is propagated.
 
-### `POST /v1/scripts`
+### `POST /v1/scripts/validate`
+
+Runs a script in the sandbox and reports on the shape it produces, without
+evaluating or rendering it. Use it to check a script and see its `print`
+output.
 
 ```sh
-curl -s localhost:8080/v1/scripts -H 'content-type: application/json' \
-  -d '{"script": "draw(sphere(#{ radius: 0.5 }))"}'
+curl -s localhost:8080/v1/scripts/validate -H 'content-type: application/json' \
+  -d '{"script": "print(\"hi\"); draw(sphere(#{ radius: 0.5 }))"}'
 ```
 ```json
-{"script_id":"3f1c…","nodes":9,"output":[],"compile_ms":0.8}
+{"nodes":9,"output":["hi"],"compile_ms":0.8}
 ```
-Returns `201` with a `Location` header, or `200` if the script was already
-cached. `output` holds anything the script `print`ed. `GET /v1/scripts/{id}`
-returns the metadata; `DELETE /v1/scripts/{id}` evicts it.
+An invalid script returns the same `422` error that the compute endpoints
+would return.
 
 ### `POST /v1/eval`
 
@@ -79,7 +83,7 @@ curl -s localhost:8080/v1/eval -H 'content-type: application/json' \
   -d '{"script": "x*x + y*y + z*z", "mode": "gradient", "points": [[1,2,3]]}'
 ```
 ```json
-{"script_id":"…","values":[14.0],"gradients":[[2.0,4.0,6.0]],"compute_ms":0.02}
+{"values":[14.0],"gradients":[[2.0,4.0,6.0]],"compute_ms":0.02}
 ```
 The `interval` mode returns `"intervals": [[lower, upper], …]`, which are
 conservative bounds of the field over each box. Non-finite results
@@ -112,7 +116,7 @@ Renders the `z = 0` slice.
 
 ```sh
 curl -s localhost:8080/v1/raster/3d -H 'content-type: application/json' -o shape.png \
-  -d '{"script_id": "…", "width": 512, "height": 512, "ssao": true,
+  -d '{"script": "draw(sphere(#{ radius: 0.8 }))", "width": 512, "height": 512, "ssao": true,
        "rotation": {"yaw": 30, "pitch": -20}, "perspective": 0.3}'
 ```
 
@@ -127,12 +131,12 @@ curl -s localhost:8080/v1/raster/3d -H 'content-type: application/json' -o shape
 Vertices are in model coordinates. The response includes
 `Content-Disposition: attachment` and an `x-triangle-count` header.
 
-PNG and STL responses also carry `x-script-id` and `x-compute-ms`.
+PNG and STL responses also carry an `x-compute-ms` header.
 
 ### Health
 
 - `GET /healthz`: liveness probe, always `200 ok`.
-- `GET /readyz`: readiness probe. Returns `200` with job and cache stats, or `503` once shutdown has begun.
+- `GET /readyz`: readiness probe. Returns `200` with job stats, or `503` once shutdown has begun.
 
 Neither probe requires authentication.
 
@@ -168,7 +172,6 @@ Every option is a flag or an environment variable (`madcad --help`):
 | `MADCAD_MAX_SCRIPT_BYTES` | `65536` | script size cap |
 | `MADCAD_MAX_SCRIPT_OPERATIONS` | `1000000` | Rhai operation budget |
 | `MADCAD_MAX_NODES` | `100000` | math-graph node cap |
-| `MADCAD_SCRIPT_CACHE_SIZE` | `256` | cached scripts |
 | `MADCAD_MAX_EVAL_POINTS` | `100000` | points or boxes per eval |
 | `MADCAD_MAX_IMAGE_SIZE_2D` | `4096` | max 2D width and height |
 | `MADCAD_MAX_IMAGE_SIZE_3D` | `2048` | max 3D width, height and depth |
@@ -179,4 +182,11 @@ Every option is a flag or an environment variable (`madcad --help`):
 
 ```sh
 cargo fmt --check && cargo clippy --all-targets && cargo test
+cargo llvm-cov --summary-only        # coverage (CI requires >= 90% of lines)
 ```
+
+The tests cover three layers:
+- unit tests next to the code (sandbox, job runner, ops, errors, transforms)
+- HTTP tests through the full router (`tests/api.rs`)
+- end-to-end tests of the real binary, covering startup, TCP serving and
+  SIGTERM/SIGINT shutdown (`tests/binary.rs`)

@@ -33,12 +33,7 @@ use tower_http::{
 };
 use tracing::Level;
 
-use crate::{
-    config::Config,
-    error::ApiError,
-    jobs::Jobs,
-    script::{ScriptCache, ScriptLimits},
-};
+use crate::{config::Config, error::ApiError, jobs::Jobs, script::ScriptLimits};
 
 #[derive(Clone)]
 pub struct AppState(Arc<Inner>);
@@ -47,7 +42,6 @@ pub struct Inner {
     pub config: Config,
     pub limits: ScriptLimits,
     pub jobs: Jobs,
-    pub scripts: ScriptCache,
     draining: AtomicBool,
     /// SHA-256 of the API token, compared in constant time
     token_hash: Option<[u8; 32]>,
@@ -80,7 +74,6 @@ impl AppState {
         Self(Arc::new(Inner {
             limits,
             jobs,
-            scripts: ScriptCache::new(config.script_cache_size),
             draining: AtomicBool::new(false),
             token_hash,
             config,
@@ -135,11 +128,7 @@ fn panic_response(_: Box<dyn std::any::Any + Send + 'static>) -> Response {
 /// Builds the application router with all middleware
 pub fn router(state: AppState) -> Router {
     let v1 = Router::new()
-        .route("/v1/scripts", post(api::create_script))
-        .route(
-            "/v1/scripts/{id}",
-            get(api::get_script).delete(api::delete_script),
-        )
+        .route("/v1/scripts/validate", post(api::validate_script))
         .route("/v1/eval", post(api::eval))
         .route("/v1/raster/2d", post(api::raster_2d))
         .route("/v1/raster/3d", post(api::raster_3d))
@@ -191,4 +180,24 @@ pub fn router(state: AppState) -> Router {
         .fallback(not_found)
         .layer(middleware)
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panic_response_is_generic_500() {
+        let res = panic_response(Box::new("secret detail"));
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn state_starts_ready() {
+        let config = <Config as clap::Parser>::parse_from(["madcad"]);
+        let state = AppState::new(config, fidget::render::ThreadPool::Global);
+        assert!(!state.is_draining());
+        assert!(state.token_hash.is_none());
+        assert_eq!(state.jobs.active(), 0);
+    }
 }

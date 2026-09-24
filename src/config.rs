@@ -57,10 +57,6 @@ pub struct Config {
     #[arg(long, env = "MADCAD_MAX_NODES", default_value_t = 100_000)]
     pub max_nodes: usize,
 
-    /// Number of compiled scripts kept in the in-memory cache
-    #[arg(long, env = "MADCAD_SCRIPT_CACHE_SIZE", default_value_t = 256)]
-    pub script_cache_size: usize,
-
     /// Maximum number of points (or intervals) per evaluation request
     #[arg(long, env = "MADCAD_MAX_EVAL_POINTS", default_value_t = 100_000)]
     pub max_eval_points: usize,
@@ -113,7 +109,6 @@ impl Config {
             // Rhai treats 0 as "unlimited"
             ("max_script_operations", self.max_script_operations),
             ("max_nodes", self.max_nodes as u64),
-            ("script_cache_size", self.script_cache_size as u64),
             ("max_eval_points", self.max_eval_points as u64),
             ("max_image_size_2d", self.max_image_size_2d.into()),
             ("max_image_size_3d", self.max_image_size_3d.into()),

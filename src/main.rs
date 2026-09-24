@@ -95,7 +95,11 @@ async fn shutdown_signal() {
 fn init_tracing(format: LogFormat) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
-    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    // Colour only on a terminal, so log collectors don't get escape codes.
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(ansi);
     match format {
         LogFormat::Json => builder.json().init(),
         LogFormat::Text => builder.init(),
