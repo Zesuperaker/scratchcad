@@ -3,11 +3,12 @@ name = "madcad-mcp"
 version = "0.1.0"
 description = "MCP server exposing the madcad HTTP API as tools"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = "==3.14.*"
 dependencies = [
     "fastmcp==4.0.8",
-    "httpx2>=2.13.1",
-    "starlette>=1.7.0",
+    "httpx2==2.13.1",
+    "starlette==1.7.0",
 ]
 
 [project.scripts]
@@ -15,15 +16,15 @@ madcad-mcp = "madcad_mcp.server:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "pytest-cov>=7.1.0",
-    "ruff>=0.16.8",
-    "mypy>=2.3.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.8",
+    "mypy==2.3.1",
 ]
 
 [build-system]
-requires = ["hatchling>=1.32.4"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

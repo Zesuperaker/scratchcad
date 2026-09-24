@@ -676,17 +676,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = "==4.0.8" },
-    { name = "httpx2", specifier = ">=2.13.1" },
-    { name = "starlette", specifier = ">=1.7.0" },
+    { name = "httpx2", specifier = "==2.13.1" },
+    { name = "starlette", specifier = "==1.7.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy", specifier = ">=2.3.1" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
-    { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "ruff", specifier = ">=0.16.8" },
+    { name = "mypy", specifier = "==2.3.1" },
+    { name = "pytest", specifier = "==9.1.1" },
+    { name = "pytest-asyncio", specifier = "==1.4.0" },
+    { name = "pytest-cov", specifier = "==7.1.0" },
+    { name = "ruff", specifier = "==0.16.8" },
 ]
 
 [[package]]

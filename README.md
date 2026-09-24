@@ -52,3 +52,15 @@ clients and configuration.
 Each directory is self-contained, with its own lockfile and checks. CI runs
 both (`.github/workflows/ci.yml`) and builds the dev images; the MCP tests
 include end-to-end runs against a freshly built `server` binary.
+
+Python dependencies in `mcp/pyproject.toml` are pinned to exact versions;
+Dependabot proposes updates weekly. After any dependency change, regenerate
+[`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt) with
+`scripts/third-party-licenses.sh` (needs
+`cargo install --locked cargo-about --features cli` once).
+
+## License
+
+madcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies,
+including [Fidget](https://github.com/mkeeter/fidget) (MPL-2.0), are listed
+with their licenses in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
