@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,6 +75,17 @@ def madcad_error(status: int, code: str, message: str) -> Handler:
         return httpx2.Response(status, json={"error": {"code": code, "message": message}})
 
     return handler
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's (or the dev container's) MADCAD_* settings out of tests.
+
+    MADCAD_BIN is test configuration (see test_integration.py), so it stays.
+    """
+    for name in list(os.environ):
+        if name.startswith("MADCAD_") and name != "MADCAD_BIN":
+            monkeypatch.delenv(name)
 
 
 @pytest.fixture

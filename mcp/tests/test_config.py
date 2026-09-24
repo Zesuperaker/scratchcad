@@ -64,3 +64,44 @@ def test_rejects_url_without_http_scheme(url: str) -> None:
 def test_rejects_bad_timeout(value: str, reason: str) -> None:
     with pytest.raises(ConfigError, match=reason):
         Settings.from_env({"MADCAD_MCP_TIMEOUT_S": value})
+
+
+def test_transport_defaults_to_stdio_on_localhost() -> None:
+    settings = Settings.from_env({})
+    assert settings.transport == "stdio"
+    assert (settings.host, settings.port) == ("127.0.0.1", 8000)
+    assert settings.allowed_hosts == ("localhost", "127.0.0.1")
+
+
+def test_reads_http_transport_settings() -> None:
+    settings = Settings.from_env(
+        {
+            "MADCAD_MCP_TRANSPORT": "http",
+            "MADCAD_MCP_HOST": "0.0.0.0",
+            "MADCAD_MCP_PORT": "9001",
+            "MADCAD_MCP_ALLOWED_HOSTS": " localhost , mcp.internal ,, ",
+        }
+    )
+    assert settings.transport == "http"
+    assert (settings.host, settings.port) == ("0.0.0.0", 9001)
+    assert settings.allowed_hosts == ("localhost", "mcp.internal")
+
+
+@pytest.mark.parametrize("value", ["sse", "HTTP", "websocket"])
+def test_rejects_unknown_transport(value: str) -> None:
+    with pytest.raises(ConfigError, match="stdio or http"):
+        Settings.from_env({"MADCAD_MCP_TRANSPORT": value})
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [("http", "an integer"), ("80.5", "an integer"), ("0", "between"), ("65536", "between")],
+)
+def test_rejects_bad_port(value: str, reason: str) -> None:
+    with pytest.raises(ConfigError, match=reason):
+        Settings.from_env({"MADCAD_MCP_PORT": value})
+
+
+def test_rejects_empty_allowed_hosts() -> None:
+    with pytest.raises(ConfigError, match="at least one host"):
+        Settings.from_env({"MADCAD_MCP_ALLOWED_HOSTS": " , ,"})

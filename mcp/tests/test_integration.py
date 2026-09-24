@@ -19,7 +19,7 @@ from typing import Any
 import httpx2
 import pytest
 from fastmcp import Client
-from fastmcp.client.transports import StdioTransport
+from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
 from mcp_types import ImageContent, TextContent
 
 from madcad_mcp.config import Settings
@@ -198,3 +198,73 @@ async def test_stdio_entry_point_end_to_end(madcad_url: str, tmp_path: Path) -> 
             {"script": CUBE, "path": "out/cube.stl", "half_size": 12, "depth": 4},
         )
     assert (tmp_path / "out" / "cube.stl").stat().st_size > 84
+
+
+@pytest.fixture
+def http_mcp(tmp_path: Path) -> Iterator[str]:
+    """The real process in HTTP mode, bound to all interfaces as in the container."""
+    port = free_port()
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "MADCAD_URL": "http://127.0.0.1:9",
+        "MADCAD_MCP_TRANSPORT": "http",
+        "MADCAD_MCP_HOST": "0.0.0.0",
+        "MADCAD_MCP_PORT": str(port),
+    }
+    process = subprocess.Popen(
+        [sys.executable, "-m", "madcad_mcp"],
+        env=env,
+        cwd=tmp_path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    base = f"http://localhost:{port}"
+    try:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                if httpx2.get(f"{base}/healthz", timeout=1).text == "ok":
+                    break
+            except httpx2.TransportError:
+                pass
+            if process.poll() is not None or time.monotonic() > deadline:
+                pytest.fail("madcad-mcp did not start in HTTP mode")
+            time.sleep(0.05)
+        yield base
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+async def test_http_transport_serves_mcp(http_mcp: str) -> None:
+    async with Client(StreamableHttpTransport(f"{http_mcp}/mcp")) as client:
+        names = {tool.name for tool in await client.list_tools()}
+        result = await client.call_tool("validate_script", {"script": CUBE}, raise_on_error=False)
+    assert names == {"validate_script", "evaluate", "render_2d", "render_3d", "export_stl"}
+    [content] = result.content
+    assert isinstance(content, TextContent)
+    assert "could not reach madcad" in content.text
+
+
+def test_http_transport_rejects_foreign_host_header(http_mcp: str) -> None:
+    """DNS-rebinding protection stays on even though the server binds 0.0.0.0."""
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    headers = {"accept": "application/json, text/event-stream"}
+    allowed = httpx2.post(f"{http_mcp}/mcp", json=initialize, headers=headers, timeout=5)
+    forged = httpx2.post(
+        f"{http_mcp}/mcp",
+        json=initialize,
+        headers={**headers, "host": "attacker.example"},
+        timeout=5,
+    )
+    assert allowed.status_code == 200
+    assert forged.status_code in (400, 403, 421)

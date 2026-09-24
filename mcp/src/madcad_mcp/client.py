@@ -1,15 +1,11 @@
 """A small async client for the madcad HTTP API."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
 import httpx2
 
 from .config import Settings
-
-_N = TypeVar("_N", int, float)
 
 # Longest excerpt of a non-JSON error body that is passed on to the model.
 _MAX_BODY_EXCERPT = 500
@@ -95,7 +91,9 @@ def _binary(response: httpx2.Response) -> BinaryResult:
     )
 
 
-def _header_number(response: httpx2.Response, name: str, kind: type[_N]) -> _N | None:
+def _header_number[N: (int, float)](
+    response: httpx2.Response, name: str, kind: type[N]
+) -> N | None:
     value = response.headers.get(name)
     if value is None:
         return None
@@ -111,7 +109,7 @@ def _error_from(response: httpx2.Response) -> MadcadError:
     try:
         error = response.json()["error"]
         code, message = str(error["code"]), str(error["message"])
-    except (ValueError, KeyError, TypeError):
+    except ValueError, KeyError, TypeError:
         pass
 
     if code is None:

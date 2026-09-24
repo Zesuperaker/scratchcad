@@ -45,9 +45,6 @@ jobs:
 
   mcp:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ["3.11", "3.13"]
     defaults:
       run:
         working-directory: mcp
@@ -64,9 +61,16 @@ jobs:
         working-directory: server
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.14"
       - run: uv sync --locked
       - run: uv run ruff format --check
       - run: uv run ruff check
       - run: uv run mypy
       - run: uv run pytest --cov
+
+  dev-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose config --quiet
+      - run: docker compose build

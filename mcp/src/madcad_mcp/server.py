@@ -3,7 +3,7 @@
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeVar
+from typing import Annotated, Any, Literal
 
 import httpx2
 from fastmcp import Context, FastMCP
@@ -11,11 +11,11 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.lifespan import lifespan
 from fastmcp.utilities.types import Image
 from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 from .client import MadcadClient, MadcadError
 from .config import ConfigError, Settings
-
-T = TypeVar("T")
 
 GUIDE = """\
 madcad models solids as implicit surfaces written in Rhai scripts. The field \
@@ -101,7 +101,7 @@ def create_server(
     mcp = FastMCP("madcad", instructions=GUIDE, lifespan=madcad_client, mask_error_details=True)
     read_only = {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
 
-    async def call(
+    async def call[T](
         ctx: Context,
         request: Callable[[MadcadClient, dict[str, Any]], Awaitable[T]],
         body: dict[str, Any],
@@ -296,6 +296,11 @@ def create_server(
             compute_ms=result.compute_ms,
         )
 
+    @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
+    async def healthz(request: Request) -> PlainTextResponse:
+        """Liveness probe for HTTP mode (used by the dev container)."""
+        return PlainTextResponse("ok")
+
     return mcp
 
 
@@ -325,4 +330,18 @@ def main() -> None:
         settings = Settings.from_env()
     except ConfigError as exc:
         sys.exit(f"madcad-mcp: {exc}")
-    create_server(settings).run(show_banner=False)
+    server = create_server(settings)
+    # The banner would only clutter MCP client logs.
+    if settings.transport == "stdio":
+        server.run(show_banner=False)
+    else:
+        server.run(
+            transport="http",
+            host=settings.host,
+            port=settings.port,
+            # FastMCP leaves this off by default for non-loopback binds, and
+            # the container must bind 0.0.0.0, so turn it on explicitly.
+            host_origin_protection=True,
+            allowed_hosts=list(settings.allowed_hosts),
+            show_banner=False,
+        )

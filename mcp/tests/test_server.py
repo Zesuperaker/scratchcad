@@ -468,9 +468,7 @@ async def test_server_can_serve_several_sessions(server: FastMCP) -> None:
 # --- entry points -----------------------------------------------------------
 
 
-def test_main_runs_the_server_with_env_settings(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_main_runs_stdio_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     built: list[Settings] = []
     runs: list[dict[str, Any]] = []
 
@@ -486,8 +484,36 @@ def test_main_runs_the_server_with_env_settings(
     [settings] = built
     assert settings.url == "http://example.test:1234"
     assert settings.output_dir == tmp_path.resolve()
-    # stdio is the default transport; the banner would only clutter client logs.
     assert runs == [{"show_banner": False}]
+
+
+def test_main_runs_http_with_host_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs: list[dict[str, Any]] = []
+    monkeypatch.setattr(FastMCP, "run", lambda self, **kwargs: runs.append(kwargs))
+    monkeypatch.setenv("MADCAD_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("MADCAD_MCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("MADCAD_MCP_PORT", "9123")
+    monkeypatch.setenv("MADCAD_MCP_ALLOWED_HOSTS", "localhost,mcp")
+    server_module.main()
+    assert runs == [
+        {
+            "transport": "http",
+            "host": "0.0.0.0",
+            "port": 9123,
+            "host_origin_protection": True,
+            "allowed_hosts": ["localhost", "mcp"],
+            "show_banner": False,
+        }
+    ]
+
+
+async def test_healthz_route(server: FastMCP) -> None:
+    app = server.http_app()
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://localhost") as http:
+        response = await http.get("/healthz")
+    assert response.status_code == 200
+    assert response.text == "ok"
 
 
 def test_main_exits_cleanly_on_bad_config(monkeypatch: pytest.MonkeyPatch) -> None:

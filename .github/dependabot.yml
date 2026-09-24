@@ -25,6 +25,6 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker
-    directory: /server
+    directories: [/server, /mcp]
     schedule:
       interval: weekly

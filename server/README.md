@@ -10,7 +10,9 @@ A lean HTTP service built on [Fidget](https://github.com/mkeeter/fidget)
 - **export** a binary STL mesh: `POST /v1/export/stl`
 
 To drive it from an AI assistant, see the MCP server in [`../mcp`](../mcp).
-Run the commands below from this `server/` directory.
+Run the commands below from this `server/` directory. For a containerised
+dev setup with live reload, use `docker compose watch` from the repo root
+(see [`Dockerfile.dev`](Dockerfile.dev)).
 
 ```sh
 cargo run --release                       # listens on 0.0.0.0:8080
