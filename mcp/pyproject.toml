@@ -1,0 +1,57 @@
+[project]
+name = "madcad-mcp"
+version = "0.1.0"
+description = "MCP server exposing the madcad HTTP API as tools"
+readme = "README.md"
+requires-python = "==3.14.*"
+dependencies = [
+    "fastmcp==4.0.8",
+    "httpx2>=2.13.1",
+    "starlette>=1.7.0",
+]
+
+[project.scripts]
+madcad-mcp = "madcad_mcp.server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.8",
+    "mypy>=2.3.1",
+]
+
+[build-system]
+requires = ["hatchling>=1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/madcad_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "PT"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--strict-markers"
+markers = ["integration: needs a real madcad binary (skipped when it is not built)"]
+
+[tool.coverage.run]
+source = ["madcad_mcp"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true

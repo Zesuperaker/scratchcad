@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+#
+# Development image for the madcad service; see ../compose.yaml. It builds
+# with the dev profile (debug assertions and overflow checks on, fast
+# incremental rebuilds) but with optimisation turned up: Fidget's generic
+# meshing and rendering code is compiled inside this crate, and at opt-level
+# 0 it runs ~50x slower than release. At these levels an STL export is ~1.6x
+# release time and an incremental rebuild still takes about two seconds.
+# For the production image, see Dockerfile.
+
+FROM rust:1.98-bookworm
+
+WORKDIR /app
+ENV CARGO_TARGET_DIR=/target \
+    MADCAD_LISTEN=0.0.0.0:8080 \
+    MADCAD_LOG_FORMAT=text \
+    RUST_LOG=info
+
+# Applies to every cargo command in the container without touching Cargo.toml.
+RUN printf '[profile.dev]\nopt-level = 2\n\n[profile.dev.package."*"]\nopt-level = 3\n' \
+      >> "$CARGO_HOME/config.toml"
+
+# Build dependencies first so they are cached independently of our sources.
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src \
+ && echo 'fn main() {}' > src/main.rs \
+ && touch src/lib.rs \
+ && cargo build --locked \
+ && rm -rf src
+
+COPY src ./src
+RUN touch src/main.rs src/lib.rs && cargo build --locked
+
+EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s --start-period=300s --retries=5 \
+  CMD ["curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+# `cargo run` recompiles on start, so a restart after a source change (which
+# `docker compose watch` does automatically) picks up the new code.
+CMD ["cargo", "run", "--locked"]

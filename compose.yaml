@@ -1,0 +1,67 @@
+# Local development stack: the madcad service plus the MCP server over HTTP.
+#
+#   docker compose up --build          # start both
+#   docker compose watch               # start both and reload on source changes
+#
+# Then point an MCP client at http://localhost:8000/mcp, e.g.
+#   claude mcp add --transport http madcad http://localhost:8000/mcp
+# STL files the model exports appear in ./output.
+#
+# Both ports are published on 127.0.0.1 only. The service runs without an API
+# token unless you put MADCAD_API_TOKEN=<16+ characters> in a .env file next
+# to this one; both containers read it.
+
+name: madcad
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.dev
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file: &env
+      - path: .env
+        required: false
+    volumes:
+      # Keeps incremental build output across container re-creation.
+      - cargo-target:/target
+    develop:
+      watch:
+        - path: ./server/src
+          target: /app/src
+          action: sync+restart
+        - path: ./server/Cargo.toml
+          action: rebuild
+        - path: ./server/Cargo.lock
+          action: rebuild
+
+  mcp:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile.dev
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file: *env
+    environment:
+      MADCAD_URL: http://server:8080
+    volumes:
+      - ./output:/output
+    depends_on:
+      server:
+        condition: service_healthy
+    develop:
+      watch:
+        - path: ./mcp/src
+          target: /app/src
+          action: sync+restart
+        - path: ./mcp/tests
+          target: /app/tests
+          action: sync
+        - path: ./mcp/pyproject.toml
+          action: rebuild
+        - path: ./mcp/uv.lock
+          action: rebuild
+
+volumes:
+  cargo-target:

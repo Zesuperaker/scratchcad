@@ -1,11 +1,19 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: /
+    directory: /server
     schedule:
       interval: weekly
     groups:
       cargo-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: uv
+    directory: /mcp
+    schedule:
+      interval: weekly
+    groups:
+      uv-minor-patch:
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions
@@ -17,6 +25,6 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker
-    directory: /
+    directories: [/server, /mcp]
     schedule:
       interval: weekly
