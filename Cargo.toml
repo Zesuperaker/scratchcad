@@ -2,7 +2,7 @@
 name = "madcad"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.98"
 description = "HTTP API for Fidget: Rhai scripting, point evaluation, rasterization and STL export"
 license = "MPL-2.0"
 publish = false
