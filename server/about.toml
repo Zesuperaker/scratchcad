@@ -1,5 +1,7 @@
 # Configuration for `cargo about`, which generates the Rust section of
 # ../THIRD_PARTY_LICENSES.txt; see ../scripts/third-party-licenses.sh.
+# Generation fails if a dependency uses a license not listed here, so a new
+# license (e.g. GPL) gets a deliberate review before it ships.
 accepted = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
