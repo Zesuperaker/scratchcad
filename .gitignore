@@ -22,3 +22,15 @@ target
 
 # Coverage profiles
 *.profraw
+
+# Python (mcp/)
+__pycache__/
+*.py[cod]
+.venv/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
