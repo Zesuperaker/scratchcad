@@ -56,7 +56,7 @@ include end-to-end runs against a freshly built `server` binary.
 Python dependencies in `mcp/pyproject.toml` are pinned to exact versions;
 Dependabot proposes updates weekly. After any dependency change, regenerate
 [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt) with
-`scripts/third-party-licenses.sh` (needs
+`uv run scripts/third_party_licenses.py` (needs
 `cargo install --locked cargo-about --features cli` once).
 
 ## License
