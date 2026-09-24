@@ -9,27 +9,27 @@ publish = false
 
 [dependencies]
 fidget = { version = "=0.5.0", default-features = false, features = ["jit", "mesh", "raster", "rhai", "shapes"] }
-rhai = { version = "1.24", features = ["sync"] }
-nalgebra = "0.35"
-rayon = "1.10"
-image = { version = "0.25", default-features = false, features = ["png"] }
+rhai = { version = "1.26.1", features = ["sync"] }
+nalgebra = "0.35.0"
+rayon = "1.12.0"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 
-axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "macros", "tokio", "tracing"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
-tower = { version = "0.5", features = ["limit", "load-shed", "timeout", "util"] }
-tower-http = { version = "0.6", features = ["catch-panic", "limit", "request-id", "sensitive-headers", "set-header", "timeout", "trace", "util"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "json", "macros", "tokio", "tracing"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower = { version = "0.5.3", features = ["limit", "load-shed", "timeout", "util"] }
+tower-http = { version = "0.7.1", features = ["catch-panic", "limit", "request-id", "sensitive-headers", "set-header", "timeout", "trace", "util"] }
 
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-clap = { version = "4", features = ["derive", "env"] }
-thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-sha2 = "0.10"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+sha2 = "0.11.0"
 
 [dev-dependencies]
-http-body-util = "0.1"
-tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }
 
 [profile.release]
 lto = "thin"
