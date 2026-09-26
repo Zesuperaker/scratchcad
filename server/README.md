@@ -180,7 +180,7 @@ Every option is a flag or an environment variable (`madcad --help`):
 | `MADCAD_MAX_EVAL_POINTS` | `100000` | points or boxes per eval |
 | `MADCAD_MAX_IMAGE_SIZE_2D` | `4096` | max 2D width and height |
 | `MADCAD_MAX_IMAGE_SIZE_3D` | `2048` | max 3D width, height and depth |
-| `MADCAD_MAX_MESH_DEPTH` | `8` | max octree depth |
+| `MADCAD_MAX_MESH_DEPTH` | `10` | max octree depth |
 | `MADCAD_MAX_MESH_TRIANGLES` | `4000000` | max triangles per STL |
 
 ## Development
