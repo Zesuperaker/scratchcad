@@ -70,7 +70,7 @@ pub struct Config {
     pub max_image_size_3d: u32,
 
     /// Maximum octree depth for meshing
-    #[arg(long, env = "MADCAD_MAX_MESH_DEPTH", default_value_t = 8)]
+    #[arg(long, env = "MADCAD_MAX_MESH_DEPTH", default_value_t = 10)]
     pub max_mesh_depth: u8,
 
     /// Maximum number of triangles in an exported mesh
