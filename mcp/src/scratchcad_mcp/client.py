@@ -1,4 +1,4 @@
-"""A small async client for the madcad HTTP API."""
+"""A small async client for the scratchcad HTTP API."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -11,8 +11,8 @@ from .config import Settings
 _MAX_BODY_EXCERPT = 500
 
 
-class MadcadError(Exception):
-    """A request to madcad failed. The message is written for the model to read."""
+class ScratchcadError(Exception):
+    """A request to scratchcad failed. The message is written for the model to read."""
 
     def __init__(self, message: str, *, code: str | None = None, status: int | None = None):
         super().__init__(message)
@@ -22,16 +22,16 @@ class MadcadError(Exception):
 
 @dataclass(frozen=True)
 class BinaryResult:
-    """A PNG or STL response, with the metadata madcad sends in headers."""
+    """A PNG or STL response, with the metadata scratchcad sends in headers."""
 
     data: bytes
     compute_ms: float | None
     triangles: int | None = None
 
 
-class MadcadClient:
+class ScratchcadClient:
     def __init__(self, settings: Settings, transport: httpx2.AsyncBaseTransport | None = None):
-        headers = {"user-agent": "madcad-mcp"}
+        headers = {"user-agent": "scratchcad-mcp"}
         if settings.api_token:
             headers["authorization"] = f"Bearer {settings.api_token}"
         self._url = settings.url
@@ -65,12 +65,12 @@ class MadcadClient:
         try:
             response = await self._http.post(path, json=body)
         except httpx2.TimeoutException:
-            raise MadcadError(
-                f"madcad at {self._url} did not respond within {self._timeout_s:g} s"
+            raise ScratchcadError(
+                f"scratchcad at {self._url} did not respond within {self._timeout_s:g} s"
             ) from None
         except httpx2.TransportError as exc:
-            raise MadcadError(
-                f"could not reach madcad at {self._url} ({type(exc).__name__}: {exc}). "
+            raise ScratchcadError(
+                f"could not reach scratchcad at {self._url} ({type(exc).__name__}: {exc}). "
                 "Is the server running?"
             ) from None
         if response.is_error:
@@ -103,7 +103,7 @@ def _header_number[N: (int, float)](
         return None
 
 
-def _error_from(response: httpx2.Response) -> MadcadError:
+def _error_from(response: httpx2.Response) -> ScratchcadError:
     status = response.status_code
     code = message = None
     try:
@@ -114,13 +114,13 @@ def _error_from(response: httpx2.Response) -> MadcadError:
 
     if code is None:
         excerpt = response.text[:_MAX_BODY_EXCERPT].strip() or response.reason_phrase
-        return MadcadError(f"madcad returned HTTP {status}: {excerpt}", status=status)
+        return ScratchcadError(f"scratchcad returned HTTP {status}: {excerpt}", status=status)
 
     text = f"{code}: {message}"
     if code == "unauthorized":
-        text += " (set MADCAD_API_TOKEN to the token the madcad server was started with)"
+        text += " (set SCRATCHCAD_API_TOKEN to the token the scratchcad server was started with)"
     elif code == "overloaded":
         text += " (the server is busy; retry in a moment)"
     elif code == "limit_exceeded":
         text += " (reduce the size, resolution or complexity of the request)"
-    return MadcadError(text, code=code, status=status)
+    return ScratchcadError(text, code=code, status=status)

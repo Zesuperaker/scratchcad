@@ -16,7 +16,7 @@ accepted = [
     "CC0-1.0",
     "Unlicense",
 ]
-# Platforms madcad is built for: the Docker images, and native builds.
+# Platforms scratchcad is built for: the Docker images, and native builds.
 targets = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",

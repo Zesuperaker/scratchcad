@@ -1,7 +1,7 @@
-# madcad-mcp
+# scratchcad-mcp
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI assistants model
-parts with the [madcad](../server) service. It is a thin wrapper over the
+parts with the [scratchcad](../server) service. It is a thin wrapper over the
 HTTP API, built with [FastMCP](https://gofastmcp.com) 4.0.8 on Python 3.14
 (and only 3.14, pinned in `pyproject.toml` and `.python-version`). It runs
 over stdio by default, or over streamable HTTP in the dev container.
@@ -24,15 +24,15 @@ and invalid arguments are rejected before any request is sent.
 ## Setup
 
 The simplest way is the Docker dev stack in the repo root: `docker compose up
---build`, then `claude mcp add --transport http madcad http://localhost:8000/mcp`.
+--build`, then `claude mcp add --transport http scratchcad http://localhost:8000/mcp`.
 
-To run it directly instead, start madcad first (`cd ../server && cargo run
+To run it directly instead, start scratchcad first (`cd ../server && cargo run
 --release`), then register this server with your MCP client.
 
 **Claude Code** (run from the repo root):
 
 ```sh
-claude mcp add madcad -- uv run --project "$PWD/mcp" madcad-mcp
+claude mcp add scratchcad -- uv run --project "$PWD/mcp" scratchcad-mcp
 ```
 
 **Claude Desktop** and other clients that take a JSON config:
@@ -40,10 +40,10 @@ claude mcp add madcad -- uv run --project "$PWD/mcp" madcad-mcp
 ```json
 {
   "mcpServers": {
-    "madcad": {
+    "scratchcad": {
       "command": "uv",
-      "args": ["run", "--project", "/absolute/path/to/madcad/mcp", "madcad-mcp"],
-      "env": { "MADCAD_MCP_OUTPUT_DIR": "/absolute/path/for/stl/files" }
+      "args": ["run", "--project", "/absolute/path/to/scratchcad/mcp", "scratchcad-mcp"],
+      "env": { "SCRATCHCAD_MCP_OUTPUT_DIR": "/absolute/path/for/stl/files" }
     }
   }
 }
@@ -53,21 +53,21 @@ claude mcp add madcad -- uv run --project "$PWD/mcp" madcad-mcp
 
 | env | default | |
 |---|---|---|
-| `MADCAD_URL` | `http://127.0.0.1:8080` | where madcad is listening |
-| `MADCAD_API_TOKEN` | unset | bearer token, if madcad was started with one |
-| `MADCAD_MCP_TIMEOUT_S` | `60` | HTTP timeout per request |
-| `MADCAD_MCP_OUTPUT_DIR` | the working directory | where `export_stl` writes files |
-| `MADCAD_MCP_TRANSPORT` | `stdio` | `stdio`, or `http` for streamable HTTP at `/mcp` |
-| `MADCAD_MCP_HOST` | `127.0.0.1` | HTTP bind address |
-| `MADCAD_MCP_PORT` | `8000` | HTTP port |
-| `MADCAD_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1` | `Host` headers accepted in HTTP mode |
+| `SCRATCHCAD_URL` | `http://127.0.0.1:8080` | where scratchcad is listening |
+| `SCRATCHCAD_API_TOKEN` | unset | bearer token, if scratchcad was started with one |
+| `SCRATCHCAD_MCP_TIMEOUT_S` | `60` | HTTP timeout per request |
+| `SCRATCHCAD_MCP_OUTPUT_DIR` | the working directory | where `export_stl` writes files |
+| `SCRATCHCAD_MCP_TRANSPORT` | `stdio` | `stdio`, or `http` for streamable HTTP at `/mcp` |
+| `SCRATCHCAD_MCP_HOST` | `127.0.0.1` | HTTP bind address |
+| `SCRATCHCAD_MCP_PORT` | `8000` | HTTP port |
+| `SCRATCHCAD_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1` | `Host` headers accepted in HTTP mode |
 
 In HTTP mode, `Host` and `Origin` checking (DNS-rebinding protection) is
 always on, including when bound to `0.0.0.0` as in the container. FastMCP
 would otherwise switch it off for non-loopback binds. `GET /healthz` returns
 `ok` for health checks.
 
-`export_stl` only writes `.stl` files inside `MADCAD_MCP_OUTPUT_DIR`. Paths
+`export_stl` only writes `.stl` files inside `SCRATCHCAD_MCP_OUTPUT_DIR`. Paths
 that leave it (`..`, absolute paths elsewhere, symlinks) are refused, and an
 existing file is only replaced when the model passes `overwrite: true`.
 
@@ -86,11 +86,11 @@ The tests cover three layers:
   against a mock transport, including every error path
 - `test_server.py`: each tool through a real in-memory MCP client session,
   covering schemas, request bodies, image content, path safety and error masking
-- `test_integration.py`: the MCP server against a real madcad binary, plus
-  the `python -m madcad_mcp` process over stdio and over HTTP (including a
-  forged `Host` header being rejected). The madcad tests use `$MADCAD_BIN` or
-  `../server/target/{release,debug}/madcad`, and are skipped when no binary
+- `test_integration.py`: the MCP server against a real scratchcad binary, plus
+  the `python -m scratchcad_mcp` process over stdio and over HTTP (including a
+  forged `Host` header being rejected). The scratchcad tests use `$SCRATCHCAD_BIN` or
+  `../server/target/{release,debug}/scratchcad`, and are skipped when no binary
   has been built.
 
-Tests ignore any `MADCAD_*` variables in your environment, so an exported
+Tests ignore any `SCRATCHCAD_*` variables in your environment, so an exported
 setting can't change their outcome.

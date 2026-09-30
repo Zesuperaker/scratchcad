@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn state_starts_ready() {
-        let config = <Config as clap::Parser>::parse_from(["madcad"]);
+        let config = <Config as clap::Parser>::parse_from(["scratchcad"]);
         let state = AppState::new(config, fidget::render::ThreadPool::Global);
         assert!(!state.is_draining());
         assert!(state.token_hash.is_none());

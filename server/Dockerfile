@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
 
+# please note that this Dockerfile has not be tested in an acctual production environment, and is provided as a reference 
+# for those who want to run scratchcad on a server. It is not guaranteed to be secure or performant, and should be used at your own risk.
+# Please open an issue or PR if this Dockerfile does not work for you, or if you have suggestions for improvements.
+
 FROM rust:1.98-bookworm AS build
 WORKDIR /src
 
@@ -14,13 +18,13 @@ RUN mkdir src \
 COPY src ./src
 RUN touch src/main.rs src/lib.rs \
  && cargo build --release --locked \
- && cp target/release/madcad /madcad
+ && cp target/release/scratchcad /scratchcad
 
 # Distroless: glibc + libgcc only, no shell, runs as uid 65532.
 FROM gcr.io/distroless/cc-debian12:nonroot
-COPY --from=build /madcad /usr/local/bin/madcad
-ENV MADCAD_LISTEN=0.0.0.0:8080 \
-    MADCAD_LOG_FORMAT=json
+COPY --from=build /scratchcad /usr/local/bin/scratchcad
+ENV SCRATCHCAD_LISTEN=0.0.0.0:8080 \
+    SCRATCHCAD_LOG_FORMAT=json
 EXPOSE 8080
 USER nonroot:nonroot
-ENTRYPOINT ["/usr/local/bin/madcad"]
+ENTRYPOINT ["/usr/local/bin/scratchcad"]

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
-use madcad::{
+use scratchcad::{
     AppState,
     config::{Config, LogFormat},
 };
@@ -51,11 +51,11 @@ async fn serve(
         "listening"
     );
     if config.api_token.is_none() {
-        tracing::warn!("MADCAD_API_TOKEN is not set; the API is unauthenticated");
+        tracing::warn!("SCRATCHCAD_API_TOKEN is not set; the API is unauthenticated");
     }
 
     let state = AppState::new(config, pool);
-    let app = madcad::router(state.clone());
+    let app = scratchcad::router(state.clone());
 
     let drain = state.clone();
     axum::serve(listener, app)

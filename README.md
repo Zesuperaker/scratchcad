@@ -1,22 +1,46 @@
-# madcad
+# scratchcad
 
-Script-driven solid modelling over HTTP, plus an MCP server so AI assistants
+> [!WARNING]
+> scratchcad is under active development. APIs, tools and script syntax may
+> change without notice, and things may break between commits.
+
+scratchcad is a rust based solid modelling API, plus an MCP server so AI assistants
 can use it.
 
-| directory | what it is |
-|---|---|
-| [`server/`](server) | The madcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
-| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's five endpoints as tools, so a model can write a script, look at renders, measure the part and export an STL. |
-
-The two are independent: the MCP server talks to the service over HTTP, so it
-works with a local build, the dev containers, or a deployed instance.
-
-## Quick start with Docker
+## Quick start (requires docker)
 
 ```sh
 docker compose up --build        # or `docker compose watch` to reload on edits
-claude mcp add --transport http madcad http://localhost:8000/mcp
 ```
+
+Then add the MCP server (`http://localhost:8000/mcp`) to your agent:
+
+```sh
+# Claude Code
+claude mcp add --transport http scratchcad http://localhost:8000/mcp
+
+# OpenAI Codex CLI
+codex mcp add scratchcad --url http://localhost:8000/mcp
+
+# Gemini CLI
+gemini mcp add --transport http scratchcad http://localhost:8000/mcp
+
+# VS Code (GitHub Copilot agent mode)
+code --add-mcp '{"name":"scratchcad","type":"http","url":"http://localhost:8000/mcp"}'
+```
+
+For other clients, point them at `http://localhost:8000/mcp` using the
+streamable HTTP transport.
+
+## Examples
+
+| prompt (using opus 5.5 medium through cc) | output |
+|---|---|
+| Create an M10 hex bolt with 26 mm thread length, a course pitch of 1.5 mm and head height 6.4 mm. Also create a matching hex nut with 8.4 mm height. Both of these should be in the same file displayed beside each other. | <img src="docs/images/m10_bolt_and_nut.gif" alt="Rotating M10 hex bolt and matching hex nut" width="320"> |
+| Create a 3DBenchy. | <img src="docs/images/benchy.gif" alt="Rotating 3DBenchy tugboat" width="320"> |
+|Create a mid-stage compressor blisk with these dimensions: an outer tip diameter of 440 mm, a hub platform diameter of 241.2 mm, and a radial blade span of 99.4 mm across its 29 twisted aerodynamic airfoils. Mechanically, the component is defined by an 80.0 mm shaft interface bore diameter, an axial hub length of 77.5 mm, and an airfoil rim width of 45.0 mm, with rear mounting flange diameters measuring 184 mm at the inner shoulder and 202 mm at the outer rim. Blade count of 29 twisted aerodynamic airfoils. | <img src="docs/images/blisk.gif" alt="Rotating 29-blade compressor blisk" width="320"> |
+
+## Docker info
 
 `compose.yaml` runs both dev images:
 
@@ -25,42 +49,34 @@ claude mcp add --transport http madcad http://localhost:8000/mcp
 | `server` | `127.0.0.1:8080` | [`server/Dockerfile.dev`](server/Dockerfile.dev): `cargo run` with fast incremental rebuilds |
 | `mcp` | `127.0.0.1:8000` | [`mcp/Dockerfile.dev`](mcp/Dockerfile.dev): the MCP server over streamable HTTP at `/mcp` |
 
-Exported STL files appear in `./output`. With `docker compose watch`, edits
-under `server/src` or `mcp/src` restart the affected container (the Rust
-side recompiles in a few seconds), and changes to `Cargo.toml`, `Cargo.lock`,
-`pyproject.toml` or `uv.lock` rebuild its image. To require an API token, put
-`MADCAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
-
 Run the MCP checks inside its container with
 `docker compose run --rm mcp uv run pytest`.
 
-## Quick start without Docker
+With `docker compose watch`, edits
+under `server/src` or `mcp/src` restart the affected container (the Rust
+side recompiles in a few seconds), and changes to `Cargo.toml`, `Cargo.lock`,
+`pyproject.toml` or `uv.lock` rebuild its image. To require an API token, put
+`SCRATCHCAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
 
-```sh
-cd server && cargo run --release                                  # http://localhost:8080
-claude mcp add madcad -- uv run --project "$PWD/mcp" madcad-mcp   # from the repo root
-```
+## STL outputs
 
-## Then
+Exported STL files appear in `./output`. These will be the main file that you recieve from the agent unless you also explicitly ask for the Rhai script that the agent created to be saved to `./output`.  
 
-Ask for a part, e.g. *"make a 20 mm cube with a 5 mm hole through it and
-export it as cube.stl"*. See [`mcp/README.md`](mcp/README.md) for other
-clients and configuration.
+## Architecture 
 
-## Development
+| directory | what it is |
+|---|---|
+| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
+| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's five endpoints as tools, so a model can write a script, look at renders, measure the part and export an STL. |
 
-Each directory is self-contained, with its own lockfile and checks. CI runs
-both (`.github/workflows/ci.yml`) and builds the dev images; the MCP tests
-include end-to-end runs against a freshly built `server` binary.
-
-Python dependencies in `mcp/pyproject.toml` are pinned to exact versions;
-Dependabot proposes updates weekly. After any dependency change, regenerate
-[`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt) with
-`uv run scripts/third_party_licenses.py` (needs
-`cargo install --locked cargo-about --features cli` once).
+The two are independent: the MCP server talks to the service over HTTP, so it
+works with a local build, the dev containers, or a deployed instance.
 
 ## License
 
-madcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies,
-including [Fidget](https://github.com/mkeeter/fidget) (MPL-2.0), are listed
+scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies, are listed
 with their licenses in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
+
+## Shoutout 
+
+A huge shoutout to Matt Keeter the developer of [Fidget](https://github.com/mkeeter/fidget), scratchcad uses fidget as the core implicit kernal and this project would not be possible without fidget.

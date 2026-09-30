@@ -1,4 +1,4 @@
-//! End-to-end tests of the `madcad` executable: startup, serving over TCP,
+//! End-to-end tests of the `scratchcad` executable: startup, serving over TCP,
 //! configuration errors and graceful shutdown on signals.
 
 #![cfg(unix)]
@@ -11,11 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The binary, with any `MADCAD_*` settings from the test environment removed
+/// The binary, with any `SCRATCHCAD_*` settings from the test environment removed
 /// (other variables, e.g. coverage instrumentation, are kept)
 fn command() -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_madcad"));
-    for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("MADCAD_")) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_scratchcad"));
+    for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("SCRATCHCAD_")) {
         cmd.env_remove(k);
     }
     cmd
@@ -23,7 +23,7 @@ fn command() -> Command {
 
 fn spawn(envs: &[(&str, &str)]) -> (Child, mpsc::Receiver<String>) {
     let mut child = command()
-        .env("MADCAD_LISTEN", "127.0.0.1:0")
+        .env("SCRATCHCAD_LISTEN", "127.0.0.1:0")
         .env("RUST_LOG", "info")
         .envs(envs.iter().copied())
         .stdout(Stdio::piped())
@@ -94,7 +94,7 @@ fn signal(child: &Child, sig: &str) {
 
 #[test]
 fn serves_and_shuts_down_on_sigterm() {
-    let (mut child, rx) = spawn(&[("MADCAD_LOG_FORMAT", "json")]);
+    let (mut child, rx) = spawn(&[("SCRATCHCAD_LOG_FORMAT", "json")]);
     let line = wait_for(&rx, "listening");
     let v: serde_json::Value = serde_json::from_str(&line).unwrap();
     let addr = v["fields"]["addr"].as_str().unwrap().to_owned();
@@ -116,8 +116,8 @@ fn serves_and_shuts_down_on_sigterm() {
 #[test]
 fn text_logs_auth_and_sigint() {
     let (mut child, rx) = spawn(&[
-        ("MADCAD_API_TOKEN", "0123456789abcdef"),
-        ("MADCAD_RENDER_THREADS", "2"),
+        ("SCRATCHCAD_API_TOKEN", "0123456789abcdef"),
+        ("SCRATCHCAD_RENDER_THREADS", "2"),
     ]);
     let line = wait_for(&rx, "listening");
     assert!(line.contains("render_threads=2"), "{line}");
@@ -158,6 +158,6 @@ fn invalid_config_fails_fast() {
     assert!(err.contains("max_nodes must be at least 1"), "{err}");
 
     // Unbindable address
-    let (mut child, _rx) = spawn(&[("MADCAD_LISTEN", "203.0.113.1:1")]);
+    let (mut child, _rx) = spawn(&[("SCRATCHCAD_LISTEN", "203.0.113.1:1")]);
     assert!(!wait_exit(&mut child).success());
 }

@@ -1,6 +1,6 @@
-"""End-to-end tests against a real madcad binary, and of the stdio entry point.
+"""End-to-end tests against a real scratchcad binary, and of the stdio entry point.
 
-The madcad tests use the binary at $MADCAD_BIN when it is set (and fail if it
+The scratchcad tests use the binary at $SCRATCHCAD_BIN when it is set (and fail if it
 is missing). Otherwise they look in the sibling server/ crate's target
 directory and are skipped when it has not been built.
 """
@@ -22,8 +22,8 @@ from fastmcp import Client
 from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
 from mcp_types import ImageContent, TextContent
 
-from madcad_mcp.config import Settings
-from madcad_mcp.server import create_server
+from scratchcad_mcp.config import Settings
+from scratchcad_mcp.server import create_server
 
 TOKEN = "integration-test-token"
 SERVER_DIR = Path(__file__).resolve().parents[2] / "server"
@@ -36,15 +36,15 @@ draw(difference(#{ shape: block, cutout: hole }))
 """
 
 
-def find_madcad() -> Path | None:
-    explicit = os.environ.get("MADCAD_BIN")
+def find_scratchcad() -> Path | None:
+    explicit = os.environ.get("SCRATCHCAD_BIN")
     if explicit:
         # An explicit path (as CI sets) must exist: fail rather than silently skip.
         if not Path(explicit).is_file():
-            pytest.fail(f"MADCAD_BIN={explicit} does not exist")
+            pytest.fail(f"SCRATCHCAD_BIN={explicit} does not exist")
         return Path(explicit)
     for kind in ("release", "debug"):
-        candidate = SERVER_DIR / "target" / kind / "madcad"
+        candidate = SERVER_DIR / "target" / kind / "scratchcad"
         if candidate.is_file():
             return candidate
     return None
@@ -58,12 +58,12 @@ def free_port() -> int:
 
 
 @pytest.fixture(scope="module")
-def madcad_url() -> Iterator[str]:
-    binary = find_madcad()
+def scratchcad_url() -> Iterator[str]:
+    binary = find_scratchcad()
     if binary is None:
-        pytest.skip("madcad binary not built (cargo build --release in server/)")
+        pytest.skip("scratchcad binary not built (cargo build --release in server/)")
     port = free_port()
-    env = {**os.environ, "MADCAD_LISTEN": f"127.0.0.1:{port}", "MADCAD_API_TOKEN": TOKEN}
+    env = {**os.environ, "SCRATCHCAD_LISTEN": f"127.0.0.1:{port}", "SCRATCHCAD_API_TOKEN": TOKEN}
     process = subprocess.Popen(
         [str(binary)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
@@ -77,7 +77,7 @@ def madcad_url() -> Iterator[str]:
             except httpx2.TransportError:
                 pass
             if process.poll() is not None or time.monotonic() > deadline:
-                pytest.fail("madcad did not start")
+                pytest.fail("scratchcad did not start")
             time.sleep(0.05)
         yield url
     finally:
@@ -92,8 +92,8 @@ def real_settings(url: str, output_dir: Path, token: str | None = TOKEN) -> Sett
 pytestmark = pytest.mark.integration
 
 
-async def test_full_modelling_workflow(madcad_url: str, tmp_path: Path) -> None:
-    async with Client(create_server(real_settings(madcad_url, tmp_path))) as client:
+async def test_full_modelling_workflow(scratchcad_url: str, tmp_path: Path) -> None:
+    async with Client(create_server(real_settings(scratchcad_url, tmp_path))) as client:
         validated = await client.call_tool("validate_script", {"script": CUBE})
         assert validated.data["nodes"] > 0
 
@@ -132,8 +132,8 @@ async def test_full_modelling_workflow(madcad_url: str, tmp_path: Path) -> None:
         assert exported.structured_content["bytes"] == len(stl) == 84 + 50 * triangles
 
 
-async def test_real_script_error_is_readable(madcad_url: str, tmp_path: Path) -> None:
-    async with Client(create_server(real_settings(madcad_url, tmp_path))) as client:
+async def test_real_script_error_is_readable(scratchcad_url: str, tmp_path: Path) -> None:
+    async with Client(create_server(real_settings(scratchcad_url, tmp_path))) as client:
         result = await client.call_tool(
             "validate_script", {"script": "let q = 1 +"}, raise_on_error=False
         )
@@ -144,8 +144,8 @@ async def test_real_script_error_is_readable(madcad_url: str, tmp_path: Path) ->
     assert "line 1" in content.text
 
 
-async def test_real_limit_error(madcad_url: str, tmp_path: Path) -> None:
-    async with Client(create_server(real_settings(madcad_url, tmp_path))) as client:
+async def test_real_limit_error(scratchcad_url: str, tmp_path: Path) -> None:
+    async with Client(create_server(real_settings(scratchcad_url, tmp_path))) as client:
         result = await client.call_tool(
             "render_2d", {"script": CUBE, "width": 100_000, "height": 8}, raise_on_error=False
         )
@@ -155,26 +155,26 @@ async def test_real_limit_error(madcad_url: str, tmp_path: Path) -> None:
     assert "limit_exceeded" in content.text or "bad_request" in content.text
 
 
-async def test_wrong_token_is_explained(madcad_url: str, tmp_path: Path) -> None:
-    settings = real_settings(madcad_url, tmp_path, token="not-the-right-token")
+async def test_wrong_token_is_explained(scratchcad_url: str, tmp_path: Path) -> None:
+    settings = real_settings(scratchcad_url, tmp_path, token="not-the-right-token")
     async with Client(create_server(settings)) as client:
         result = await client.call_tool("validate_script", {"script": CUBE}, raise_on_error=False)
     [content] = result.content
     assert isinstance(content, TextContent)
     assert content.text.startswith("unauthorized:")
-    assert "MADCAD_API_TOKEN" in content.text
+    assert "SCRATCHCAD_API_TOKEN" in content.text
 
 
 def stdio_client(env: dict[str, str], cwd: Path) -> Client[Any]:
     transport = StdioTransport(
-        command=sys.executable, args=["-m", "madcad_mcp"], env=env, cwd=str(cwd)
+        command=sys.executable, args=["-m", "scratchcad_mcp"], env=env, cwd=str(cwd)
     )
     return Client(transport)
 
 
 async def test_stdio_entry_point_lists_tools(tmp_path: Path) -> None:
-    """The real process speaks MCP over stdio; no madcad needed to list tools."""
-    env = {"PATH": os.environ.get("PATH", ""), "MADCAD_URL": "http://127.0.0.1:9"}
+    """The real process speaks MCP over stdio; no scratchcad needed to list tools."""
+    env = {"PATH": os.environ.get("PATH", ""), "SCRATCHCAD_URL": "http://127.0.0.1:9"}
     async with stdio_client(env, tmp_path) as client:
         names = {tool.name for tool in await client.list_tools()}
         result = await client.call_tool("validate_script", {"script": CUBE}, raise_on_error=False)
@@ -182,15 +182,15 @@ async def test_stdio_entry_point_lists_tools(tmp_path: Path) -> None:
     assert result.is_error
     [content] = result.content
     assert isinstance(content, TextContent)
-    assert "could not reach madcad" in content.text
+    assert "could not reach scratchcad" in content.text
 
 
-async def test_stdio_entry_point_end_to_end(madcad_url: str, tmp_path: Path) -> None:
+async def test_stdio_entry_point_end_to_end(scratchcad_url: str, tmp_path: Path) -> None:
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "MADCAD_URL": madcad_url,
-        "MADCAD_API_TOKEN": TOKEN,
-        "MADCAD_MCP_OUTPUT_DIR": str(tmp_path),
+        "SCRATCHCAD_URL": scratchcad_url,
+        "SCRATCHCAD_API_TOKEN": TOKEN,
+        "SCRATCHCAD_MCP_OUTPUT_DIR": str(tmp_path),
     }
     async with stdio_client(env, tmp_path) as client:
         await client.call_tool(
@@ -206,13 +206,13 @@ def http_mcp(tmp_path: Path) -> Iterator[str]:
     port = free_port()
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "MADCAD_URL": "http://127.0.0.1:9",
-        "MADCAD_MCP_TRANSPORT": "http",
-        "MADCAD_MCP_HOST": "0.0.0.0",
-        "MADCAD_MCP_PORT": str(port),
+        "SCRATCHCAD_URL": "http://127.0.0.1:9",
+        "SCRATCHCAD_MCP_TRANSPORT": "http",
+        "SCRATCHCAD_MCP_HOST": "0.0.0.0",
+        "SCRATCHCAD_MCP_PORT": str(port),
     }
     process = subprocess.Popen(
-        [sys.executable, "-m", "madcad_mcp"],
+        [sys.executable, "-m", "scratchcad_mcp"],
         env=env,
         cwd=tmp_path,
         stdout=subprocess.DEVNULL,
@@ -228,7 +228,7 @@ def http_mcp(tmp_path: Path) -> Iterator[str]:
             except httpx2.TransportError:
                 pass
             if process.poll() is not None or time.monotonic() > deadline:
-                pytest.fail("madcad-mcp did not start in HTTP mode")
+                pytest.fail("scratchcad-mcp did not start in HTTP mode")
             time.sleep(0.05)
         yield base
     finally:
@@ -243,7 +243,7 @@ async def test_http_transport_serves_mcp(http_mcp: str) -> None:
     assert names == {"validate_script", "evaluate", "render_2d", "render_3d", "export_stl"}
     [content] = result.content
     assert isinstance(content, TextContent)
-    assert "could not reach madcad" in content.text
+    assert "could not reach scratchcad" in content.text
 
 
 def test_http_transport_rejects_foreign_host_header(http_mcp: str) -> None:

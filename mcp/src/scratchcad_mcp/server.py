@@ -1,4 +1,4 @@
-"""MCP server exposing the madcad API as five tools."""
+"""MCP server exposing the scratchcad API as five tools."""
 
 import sys
 from collections.abc import Awaitable, Callable
@@ -14,11 +14,11 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-from .client import MadcadClient, MadcadError
+from .client import ScratchcadClient, ScratchcadError
 from .config import ConfigError, Settings
 
 GUIDE = """\
-madcad models solids as implicit surfaces written in Rhai scripts. The field \
+scratchcad models solids as implicit surfaces written in Rhai scripts. The field \
 is negative inside the shape, zero on the surface and positive outside.
 
 A script produces its shape in one of two ways:
@@ -91,25 +91,25 @@ def create_server(
     """Build the server. `transport` lets tests replace the network."""
 
     @lifespan
-    async def madcad_client(server: FastMCP) -> Any:
-        api = MadcadClient(settings, transport)
+    async def scratchcad_client(server: FastMCP) -> Any:
+        api = ScratchcadClient(settings, transport)
         try:
             yield {"api": api}
         finally:
             await api.aclose()
 
-    mcp = FastMCP("madcad", instructions=GUIDE, lifespan=madcad_client, mask_error_details=True)
+    mcp = FastMCP("scratchcad", instructions=GUIDE, lifespan=scratchcad_client, mask_error_details=True)
     read_only = {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
 
     async def call[T](
         ctx: Context,
-        request: Callable[[MadcadClient, dict[str, Any]], Awaitable[T]],
+        request: Callable[[ScratchcadClient, dict[str, Any]], Awaitable[T]],
         body: dict[str, Any],
     ) -> T:
-        api: MadcadClient = ctx.lifespan_context["api"]
+        api: ScratchcadClient = ctx.lifespan_context["api"]
         try:
             return await request(api, _drop_none(body))
-        except MadcadError as exc:
+        except ScratchcadError as exc:
             raise ToolError(str(exc)) from None
 
     @mcp.tool(annotations=read_only)
@@ -119,7 +119,7 @@ def create_server(
         Returns the node count of the resulting math graph, anything the script
         printed and the compile time. Errors include the line and column.
         """
-        return await call(ctx, MadcadClient.validate, {"script": script})
+        return await call(ctx, ScratchcadClient.validate, {"script": script})
 
     @mcp.tool(annotations=read_only)
     async def evaluate(
@@ -150,7 +150,7 @@ def create_server(
         """
         return await call(
             ctx,
-            MadcadClient.eval,
+            ScratchcadClient.eval,
             {
                 "script": script,
                 "mode": mode,
@@ -186,7 +186,7 @@ def create_server(
         """
         result = await call(
             ctx,
-            MadcadClient.raster_2d,
+            ScratchcadClient.raster_2d,
             {
                 "script": script,
                 "width": width,
@@ -231,7 +231,7 @@ def create_server(
         """
         result = await call(
             ctx,
-            MadcadClient.raster_3d,
+            ScratchcadClient.raster_3d,
             {
                 "script": script,
                 "width": width,
@@ -255,7 +255,7 @@ def create_server(
             str,
             Field(
                 description="Where to write the .stl file, relative to the output "
-                "directory (MADCAD_MCP_OUTPUT_DIR). It cannot leave that directory."
+                "directory (SCRATCHCAD_MCP_OUTPUT_DIR). It cannot leave that directory."
             ),
         ],
         ctx: Context,
@@ -278,7 +278,7 @@ def create_server(
         target = _resolve_output(settings.output_dir, path, overwrite)
         result = await call(
             ctx,
-            MadcadClient.export_stl,
+            ScratchcadClient.export_stl,
             {
                 "script": script,
                 "center": list(center),
@@ -329,7 +329,7 @@ def main() -> None:
     try:
         settings = Settings.from_env()
     except ConfigError as exc:
-        sys.exit(f"madcad-mcp: {exc}")
+        sys.exit(f"scratchcad-mcp: {exc}")
     server = create_server(settings)
     # The banner would only clutter MCP client logs.
     if settings.transport == "stdio":
