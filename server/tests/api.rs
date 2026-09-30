@@ -7,7 +7,7 @@ use axum::{
 };
 use clap::Parser;
 use http_body_util::BodyExt;
-use madcad::{AppState, config::Config};
+use vibecad::{AppState, config::Config};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -19,13 +19,13 @@ const HEAVY: &str = "let s = sin(x * 40) * cos(y * 40) + sin(y * 40) * cos(z * 4
                      draw(max(abs(s) - 0.2, sqrt(x*x + y*y + z*z) - 0.9))";
 
 fn state_with(args: &[&str]) -> AppState {
-    let config = Config::parse_from(std::iter::once("madcad").chain(args.iter().copied()));
+    let config = Config::parse_from(std::iter::once("vibecad").chain(args.iter().copied()));
     config.validate().unwrap();
     AppState::new(config, fidget::render::ThreadPool::Global)
 }
 
 fn app_with(args: &[&str]) -> Router {
-    madcad::router(state_with(args))
+    vibecad::router(state_with(args))
 }
 
 fn app() -> Router {
@@ -102,7 +102,7 @@ async fn health_and_readiness() {
 #[tokio::test]
 async fn draining_fails_readiness_and_rejects_jobs() {
     let state = state_with(&[]);
-    let app = madcad::router(state.clone());
+    let app = vibecad::router(state.clone());
     state.start_draining();
     assert!(state.is_draining());
 

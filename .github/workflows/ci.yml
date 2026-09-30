@@ -50,7 +50,7 @@ jobs:
         working-directory: mcp
     env:
       # The integration tests run the MCP server against this real binary.
-      MADCAD_BIN: ${{ github.workspace }}/server/target/release/madcad
+      VIBECAD_BIN: ${{ github.workspace }}/server/target/release/vibecad
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

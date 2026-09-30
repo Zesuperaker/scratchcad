@@ -1,4 +1,4 @@
-# madcad
+# vibecad
 
 A lean HTTP service built on [Fidget](https://github.com/mkeeter/fidget)
 **v0.5.0** and [axum](https://github.com/tokio-rs/axum). You send it
@@ -16,7 +16,7 @@ dev setup with live reload, use `docker compose watch` from the repo root
 
 ```sh
 cargo run --release                       # listens on 0.0.0.0:8080
-docker build -t madcad . && docker run -p 8080:8080 -e MADCAD_API_TOKEN=... madcad
+docker build -t vibecad . && docker run -p 8080:8080 -e VIBECAD_API_TOKEN=... vibecad
 ```
 
 ## Scripts
@@ -49,12 +49,12 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 | 400 | `bad_request`, `invalid_json` | malformed or contradictory input (unknown fields are rejected) |
 | 401 | `unauthorized` | missing or wrong bearer token |
 | 404 | `not_found` | unknown route |
-| 413 | `payload_too_large` | body over `MADCAD_MAX_BODY_BYTES` |
+| 413 | `payload_too_large` | body over `VIBECAD_MAX_BODY_BYTES` |
 | 422 | `script_error` | Rhai parse or runtime error (message includes line and column) |
 | 422 | `limit_exceeded` | a configured limit was hit (size, operations, nodes, triangles and so on) |
 | 422 | `unprocessable` | the shape cannot be evaluated (for example, free variables) |
 | 503 | `overloaded` | no job slot became free within the queue timeout (`Retry-After: 1`) |
-| 504 | `timeout` | the job ran past `MADCAD_JOB_TIMEOUT_MS` and was cancelled |
+| 504 | `timeout` | the job ran past `VIBECAD_JOB_TIMEOUT_MS` and was cancelled |
 
 Every response carries an `x-request-id` header. If the request sent one, it
 is propagated.
@@ -100,7 +100,7 @@ Renders the `z = 0` slice.
 
 | field | default | |
 |---|---|---|
-| `width`, `height` | required | pixels, `1..=MADCAD_MAX_IMAGE_SIZE_2D` |
+| `width`, `height` | required | pixels, `1..=VIBECAD_MAX_IMAGE_SIZE_2D` |
 | `mode` | `"mono"` | `mono` (white on black), `sdf` (distance-field colouring), `debug` (interval levels) |
 | `center` | `[0, 0]` | model-space point at the image center |
 | `half_size` | `1.0` | the view spans `center ± half_size` |
@@ -109,7 +109,7 @@ Renders the `z = 0` slice.
 
 | field | default | |
 |---|---|---|
-| `width`, `height` | required | pixels, `1..=MADCAD_MAX_IMAGE_SIZE_3D` |
+| `width`, `height` | required | pixels, `1..=VIBECAD_MAX_IMAGE_SIZE_3D` |
 | `depth` | `max(width, height)` | voxels along the view axis |
 | `mode` | `"shaded"` | `shaded`, `normals` or `heightmap` |
 | `ssao` | `false` | ambient occlusion (only with `shaded`) |
@@ -129,7 +129,7 @@ curl -s localhost:8080/v1/raster/3d -H 'content-type: application/json' -o shape
 
 | field | default | |
 |---|---|---|
-| `depth` | `6` | octree depth, `1..=MADCAD_MAX_MESH_DEPTH`; resolution is `2^depth` cells per axis |
+| `depth` | `6` | octree depth, `1..=VIBECAD_MAX_MESH_DEPTH`; resolution is `2^depth` cells per axis |
 | `center` | `[0, 0, 0]` | center of the meshed cube |
 | `half_size` | `1.0` | the meshed region is `center ± half_size` |
 
@@ -148,13 +148,13 @@ Neither probe requires authentication.
 ## Production behaviour
 
 - **Sandboxed scripts.** Rhai runs with an operation budget, limits on call depth, expression depth, string, array and map size, and a node cap on the resulting math graph. It has no `import` (no filesystem) and no `eval`, and `print`/`debug` are captured into the response rather than written to stdout.
-- **Bounded compute.** At most `MADCAD_MAX_CONCURRENT_JOBS` jobs run at once, on blocking threads with a dedicated Rayon pool for Fidget. Other requests queue for up to `MADCAD_QUEUE_TIMEOUT_MS` and then get a `503`.
+- **Bounded compute.** At most `VIBECAD_MAX_CONCURRENT_JOBS` jobs run at once, on blocking threads with a dedicated Rayon pool for Fidget. Other requests queue for up to `VIBECAD_QUEUE_TIMEOUT_MS` and then get a `503`.
 - **Real cancellation.** Every job gets a Fidget `CancelToken`. The token trips on timeout **and** when the client disconnects. Fidget's renderers, the mesher and the Rhai sandbox all check it, so abandoned work stops instead of burning CPU. A job keeps its slot until it has actually stopped, so timed-out work never oversubscribes the machine.
 - **Bounded inputs and outputs.** Limits cover body size, script size, point count, image dimensions, mesh depth and triangle count. Every float input is checked to be finite.
 - **Fault isolation.** A panic in a job or handler becomes a `500` with a generic message, and the details go to the logs.
 - **Graceful shutdown.** On `SIGTERM` or `SIGINT`, readiness flips to `503`, queued jobs are rejected, in-flight requests finish, and blocking work gets 5 s to wind down.
-- **Observability.** Structured logs (`MADCAD_LOG_FORMAT=json`, filtered with `RUST_LOG`) carry a per-request span with the request ID, and the log level is set by response status.
-- **Authentication.** An optional bearer token (`MADCAD_API_TOKEN`, at least 16 chars) is compared in constant time, and the `Authorization` header is redacted from logs.
+- **Observability.** Structured logs (`VIBECAD_LOG_FORMAT=json`, filtered with `RUST_LOG`) carry a per-request span with the request ID, and the log level is set by response status.
+- **Authentication.** An optional bearer token (`VIBECAD_API_TOKEN`, at least 16 chars) is compared in constant time, and the `Authorization` header is redacted from logs.
 - The container image is distroless and runs as a non-root user.
 
 Put the service behind a reverse proxy or load balancer for TLS, connection
@@ -162,26 +162,26 @@ limits and slow-header protection. It doesn't terminate TLS itself.
 
 ## Configuration
 
-Every option is a flag or an environment variable (`madcad --help`):
+Every option is a flag or an environment variable (`vibecad --help`):
 
 | env | default | |
 |---|---|---|
-| `MADCAD_LISTEN` | `0.0.0.0:8080` | bind address |
-| `MADCAD_API_TOKEN` | unset | require `Authorization: Bearer <token>` on `/v1/*` |
-| `MADCAD_LOG_FORMAT` | `text` | `text` or `json` |
-| `MADCAD_RENDER_THREADS` | #CPUs | Rayon threads for Fidget |
-| `MADCAD_MAX_CONCURRENT_JOBS` | `4` | parallel jobs |
-| `MADCAD_QUEUE_TIMEOUT_MS` | `5000` | max wait for a job slot |
-| `MADCAD_JOB_TIMEOUT_MS` | `30000` | per-job budget |
-| `MADCAD_MAX_BODY_BYTES` | `4194304` | request body cap |
-| `MADCAD_MAX_SCRIPT_BYTES` | `65536` | script size cap |
-| `MADCAD_MAX_SCRIPT_OPERATIONS` | `1000000` | Rhai operation budget |
-| `MADCAD_MAX_NODES` | `100000` | math-graph node cap |
-| `MADCAD_MAX_EVAL_POINTS` | `100000` | points or boxes per eval |
-| `MADCAD_MAX_IMAGE_SIZE_2D` | `4096` | max 2D width and height |
-| `MADCAD_MAX_IMAGE_SIZE_3D` | `2048` | max 3D width, height and depth |
-| `MADCAD_MAX_MESH_DEPTH` | `10` | max octree depth |
-| `MADCAD_MAX_MESH_TRIANGLES` | `4000000` | max triangles per STL |
+| `VIBECAD_LISTEN` | `0.0.0.0:8080` | bind address |
+| `VIBECAD_API_TOKEN` | unset | require `Authorization: Bearer <token>` on `/v1/*` |
+| `VIBECAD_LOG_FORMAT` | `text` | `text` or `json` |
+| `VIBECAD_RENDER_THREADS` | #CPUs | Rayon threads for Fidget |
+| `VIBECAD_MAX_CONCURRENT_JOBS` | `4` | parallel jobs |
+| `VIBECAD_QUEUE_TIMEOUT_MS` | `5000` | max wait for a job slot |
+| `VIBECAD_JOB_TIMEOUT_MS` | `30000` | per-job budget |
+| `VIBECAD_MAX_BODY_BYTES` | `4194304` | request body cap |
+| `VIBECAD_MAX_SCRIPT_BYTES` | `65536` | script size cap |
+| `VIBECAD_MAX_SCRIPT_OPERATIONS` | `1000000` | Rhai operation budget |
+| `VIBECAD_MAX_NODES` | `100000` | math-graph node cap |
+| `VIBECAD_MAX_EVAL_POINTS` | `100000` | points or boxes per eval |
+| `VIBECAD_MAX_IMAGE_SIZE_2D` | `4096` | max 2D width and height |
+| `VIBECAD_MAX_IMAGE_SIZE_3D` | `2048` | max 3D width, height and depth |
+| `VIBECAD_MAX_MESH_DEPTH` | `10` | max octree depth |
+| `VIBECAD_MAX_MESH_TRIANGLES` | `4000000` | max triangles per STL |
 
 ## Development
 

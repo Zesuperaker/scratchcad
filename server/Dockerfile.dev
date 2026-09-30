@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Development image for the madcad service; see ../compose.yaml. It builds
+# Development image for the vibecad service; see ../compose.yaml. It builds
 # with the dev profile (debug assertions and overflow checks on, fast
 # incremental rebuilds) but with optimisation turned up: Fidget's generic
 # meshing and rendering code is compiled inside this crate, and at opt-level
@@ -12,8 +12,8 @@ FROM rust:1.98-bookworm
 
 WORKDIR /app
 ENV CARGO_TARGET_DIR=/target \
-    MADCAD_LISTEN=0.0.0.0:8080 \
-    MADCAD_LOG_FORMAT=text \
+    VIBECAD_LISTEN=0.0.0.0:8080 \
+    VIBECAD_LOG_FORMAT=text \
     RUST_LOG=info
 
 # Applies to every cargo command in the container without touching Cargo.toml.
