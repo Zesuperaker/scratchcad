@@ -167,16 +167,22 @@ impl ShapeJob for Raster2d<'_> {
     where
         F: Function + MathFunction + RenderHints + Clone,
     {
-        use fidget::raster::{effects, pixel::RenderConfig};
+        use fidget::raster::{
+            effects,
+            pixel::{EvalConfig, RenderConfig, render},
+        };
         let threads = Some(self.pool);
         let cfg = RenderConfig {
-            threads,
             pixel_perfect: self.mode == Mode2d::Sdf,
             world_to_model: self.world_to_model,
-            cancel: self.cancel,
             ..RenderConfig::from_size(self.size)
         };
-        let img = cfg.run(bind(shape)?).ok_or(ApiError::Timeout)?;
+        let eval = EvalConfig {
+            threads,
+            cancel: self.cancel,
+            ..Default::default()
+        };
+        let img = render(bind(shape)?, &cfg, &eval).ok_or(ApiError::Timeout)?;
         let rgba = match self.mode {
             Mode2d::Mono => effects::to_rgba_bitmap(img, false, threads),
             Mode2d::Sdf => effects::to_rgba_distance(img, threads),
@@ -218,15 +224,21 @@ impl ShapeJob for Raster3d<'_> {
     where
         F: Function + MathFunction + RenderHints + Clone,
     {
-        use fidget::raster::{effects, voxel::RenderConfig};
+        use fidget::raster::{
+            effects,
+            voxel::{EvalConfig, RenderConfig, render},
+        };
         let threads = Some(self.pool);
         let cfg = RenderConfig {
-            threads,
             world_to_model: self.world_to_model,
-            cancel: self.cancel.clone(),
             ..RenderConfig::from_size(self.size)
         };
-        let image = cfg.run(bind(shape)?).ok_or(ApiError::Timeout)?;
+        let eval = EvalConfig {
+            threads,
+            cancel: self.cancel.clone(),
+            ..Default::default()
+        };
+        let image = render(bind(shape)?, &cfg, &eval).ok_or(ApiError::Timeout)?;
         if self.cancel.is_cancelled() {
             return Err(ApiError::Timeout);
         }

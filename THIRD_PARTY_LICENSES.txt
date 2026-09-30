@@ -4533,8 +4533,8 @@ Used by:
   - allocator-api2 0.2.21 (https://github.com/zakarumych/allocator-api2)
   - allocator-api2 0.4.0 (https://github.com/zakarumych/allocator-api2)
   - document-features 0.2.12 (https://github.com/slint-ui/document-features)
-  - enum-map-derive 0.17.0 (https://codeberg.org/xfix/enum-map)
-  - enum-map 2.7.3 (https://codeberg.org/xfix/enum-map)
+  - enum-map-derive 1.0.1 (https://codeberg.org/sugar700/enum-map)
+  - enum-map 3.1.0 (https://codeberg.org/sugar700/enum-map)
   - facet-core 0.46.5 (https://github.com/facet-rs/facet)
   - facet-macro-parse 0.46.5 (https://github.com/facet-rs/facet)
   - facet-macro-types 0.46.5 (https://github.com/facet-rs/facet)
@@ -6023,13 +6023,13 @@ Mozilla Public License 2.0
 Used by:
   - dynasm 5.1.0 (https://github.com/CensoredUsername/dynasm-rs)
   - dynasmrt 5.1.0 (https://github.com/CensoredUsername/dynasm-rs)
-  - fidget-core 0.5.0 (https://github.com/mkeeter/fidget)
-  - fidget-jit 0.5.0 (https://github.com/mkeeter/fidget)
-  - fidget-mesh 0.5.0 (https://github.com/mkeeter/fidget)
-  - fidget-raster 0.5.0 (https://github.com/mkeeter/fidget)
-  - fidget-rhai 0.5.0 (https://github.com/mkeeter/fidget)
-  - fidget-shapes 0.5.0 (https://github.com/mkeeter/fidget)
-  - fidget 0.5.0 (https://github.com/mkeeter/fidget)
+  - fidget-core 0.5.1 (https://github.com/mkeeter/fidget)
+  - fidget-jit 0.5.1 (https://github.com/mkeeter/fidget)
+  - fidget-mesh 0.5.1 (https://github.com/mkeeter/fidget)
+  - fidget-raster 0.5.1 (https://github.com/mkeeter/fidget)
+  - fidget-rhai 0.5.1 (https://github.com/mkeeter/fidget)
+  - fidget-shapes 0.5.1 (https://github.com/mkeeter/fidget)
+  - fidget 0.5.1 (https://github.com/mkeeter/fidget)
 --------------------------------------------------------------------------------
 Mozilla Public License Version 2.0
 ==================================

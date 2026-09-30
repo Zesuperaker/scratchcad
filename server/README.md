@@ -1,7 +1,7 @@
 # scratchcad
 
 A lean HTTP service built on [Fidget](https://github.com/mkeeter/fidget)
-**v0.5.0** and [axum](https://github.com/tokio-rs/axum). You send it
+**v0.5.1** and [axum](https://github.com/tokio-rs/axum). You send it
 [Rhai](https://rhai.rs) scripts that describe implicit surfaces, and it can:
 
 - **validate scripts**: `POST /v1/scripts/validate`
@@ -24,7 +24,7 @@ docker build -t scratchcad . && docker run -p 8080:8080 -e SCRATCHCAD_API_TOKEN=
 Scripts use Fidget's Rhai bindings (`x`, `y`, `z`, arithmetic, `min`/`max`,
 `sqrt`, `sin`, `remap`, shape constructors such as `sphere(#{ radius: 1.0 })`,
 `circle`, `union`, `difference` and so on; see the
-[`fidget::rhai` docs](https://docs.rs/fidget/0.5.0/fidget/rhai/index.html)).
+[`fidget::rhai` docs](https://docs.rs/fidget/0.5.1/fidget/rhai/index.html)).
 A script produces its shape in one of two ways:
 
 - it calls `draw(shape)` exactly once, or
