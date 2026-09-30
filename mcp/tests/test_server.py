@@ -378,7 +378,9 @@ async def test_export_stl_rejects_symlink_escape(
     assert list(outside.iterdir()) == []
 
 
-async def test_export_stl_resolves_a_symlinked_output_dir(fake: FakeScratchcad, tmp_path: Path) -> None:
+async def test_export_stl_resolves_a_symlinked_output_dir(
+    fake: FakeScratchcad, tmp_path: Path
+) -> None:
     real = tmp_path / "real"
     real.mkdir()
     (tmp_path / "alias").symlink_to(real, target_is_directory=True)

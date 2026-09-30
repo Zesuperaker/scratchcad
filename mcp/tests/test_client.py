@@ -19,7 +19,9 @@ async def api(settings: Settings, fake: FakeScratchcad) -> AsyncIterator[Scratch
     await api.aclose()
 
 
-async def test_posts_json_to_the_configured_server(api: ScratchcadClient, fake: FakeScratchcad) -> None:
+async def test_posts_json_to_the_configured_server(
+    api: ScratchcadClient, fake: FakeScratchcad
+) -> None:
     assert await api.validate({"script": "x"}) == {
         "nodes": 9,
         "output": ["hi"],
@@ -35,7 +37,9 @@ async def test_posts_json_to_the_configured_server(api: ScratchcadClient, fake: 
 
 
 async def test_sends_bearer_token_when_configured(fake: FakeScratchcad) -> None:
-    api = ScratchcadClient(Settings(url="http://scratchcad.test", api_token="s3cret"), fake.transport())
+    api = ScratchcadClient(
+        Settings(url="http://scratchcad.test", api_token="s3cret"), fake.transport()
+    )
     await api.validate({"script": "x"})
     await api.aclose()
     assert fake.last.headers["authorization"] == "Bearer s3cret"
@@ -66,7 +70,9 @@ async def test_binary_responses_carry_header_metadata(api: ScratchcadClient) -> 
     assert stl.triangles == 1234
 
 
-async def test_missing_or_garbled_headers_become_none(api: ScratchcadClient, fake: FakeScratchcad) -> None:
+async def test_missing_or_garbled_headers_become_none(
+    api: ScratchcadClient, fake: FakeScratchcad
+) -> None:
     fake.handler = lambda request: httpx2.Response(
         200, content=b"stl", headers={"x-compute-ms": "fast", "x-triangle-count": "1.5"}
     )
@@ -116,7 +122,9 @@ async def test_non_scratchcad_errors_report_status_and_body(
     api: ScratchcadClient, fake: FakeScratchcad, response: httpx2.Response, expected: str
 ) -> None:
     fake.handler = lambda request: response
-    with pytest.raises(ScratchcadError, match="^scratchcad returned " + re.escape(expected)) as caught:
+    with pytest.raises(
+        ScratchcadError, match="^scratchcad returned " + re.escape(expected)
+    ) as caught:
         await api.eval({"script": "x"})
     assert caught.value.code is None
     assert caught.value.status == response.status_code
@@ -145,7 +153,9 @@ async def test_timeout_reports_the_budget() -> None:
     def hang(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ReadTimeout("timed out", request=request)
 
-    api = ScratchcadClient(Settings(url="http://scratchcad.test", timeout_s=7), httpx2.MockTransport(hang))
+    api = ScratchcadClient(
+        Settings(url="http://scratchcad.test", timeout_s=7), httpx2.MockTransport(hang)
+    )
     with pytest.raises(ScratchcadError, match="did not respond within 7 s"):
         await api.raster_3d({"script": "x"})
     await api.aclose()

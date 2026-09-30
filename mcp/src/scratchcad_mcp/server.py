@@ -98,7 +98,9 @@ def create_server(
         finally:
             await api.aclose()
 
-    mcp = FastMCP("scratchcad", instructions=GUIDE, lifespan=scratchcad_client, mask_error_details=True)
+    mcp = FastMCP(
+        "scratchcad", instructions=GUIDE, lifespan=scratchcad_client, mask_error_details=True
+    )
     read_only = {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
 
     async def call[T](

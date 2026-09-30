@@ -74,7 +74,11 @@ pub struct Config {
     pub max_mesh_depth: u8,
 
     /// Maximum number of triangles in an exported mesh
-    #[arg(long, env = "SCRATCHCAD_MAX_MESH_TRIANGLES", default_value_t = 4_000_000)]
+    #[arg(
+        long,
+        env = "SCRATCHCAD_MAX_MESH_TRIANGLES",
+        default_value_t = 4_000_000
+    )]
     pub max_mesh_triangles: usize,
 }
 
