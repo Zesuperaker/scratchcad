@@ -1,4 +1,4 @@
-//! Runtime configuration, sourced from CLI flags or `VIBECAD_*` env vars.
+//! Runtime configuration, sourced from CLI flags or `SCRATCHCAD_*` env vars.
 
 use std::{net::SocketAddr, num::NonZeroUsize, time::Duration};
 
@@ -9,72 +9,72 @@ use clap::Parser;
 #[command(version, about)]
 pub struct Config {
     /// Address to listen on
-    #[arg(long, env = "VIBECAD_LISTEN", default_value = "0.0.0.0:8080")]
+    #[arg(long, env = "SCRATCHCAD_LISTEN", default_value = "0.0.0.0:8080")]
     pub listen: SocketAddr,
 
     /// Optional bearer token required on every `/v1` route
-    #[arg(long, env = "VIBECAD_API_TOKEN", hide_env_values = true)]
+    #[arg(long, env = "SCRATCHCAD_API_TOKEN", hide_env_values = true)]
     pub api_token: Option<String>,
 
     /// Log output format
-    #[arg(long, env = "VIBECAD_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
+    #[arg(long, env = "SCRATCHCAD_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
 
     /// Worker threads used by Fidget for rendering and meshing
     /// (defaults to the number of CPUs)
-    #[arg(long, env = "VIBECAD_RENDER_THREADS")]
+    #[arg(long, env = "SCRATCHCAD_RENDER_THREADS")]
     pub render_threads: Option<NonZeroUsize>,
 
     /// Maximum number of jobs executing at once; further requests queue
-    #[arg(long, env = "VIBECAD_MAX_CONCURRENT_JOBS", default_value_t = 4)]
+    #[arg(long, env = "SCRATCHCAD_MAX_CONCURRENT_JOBS", default_value_t = 4)]
     pub max_concurrent_jobs: usize,
 
     /// How long a request may wait for a job slot before getting a 503
-    #[arg(long, env = "VIBECAD_QUEUE_TIMEOUT_MS", default_value_t = 5_000)]
+    #[arg(long, env = "SCRATCHCAD_QUEUE_TIMEOUT_MS", default_value_t = 5_000)]
     pub queue_timeout_ms: u64,
 
     /// Wall-clock budget for a single job (script + evaluation / render)
-    #[arg(long, env = "VIBECAD_JOB_TIMEOUT_MS", default_value_t = 30_000)]
+    #[arg(long, env = "SCRATCHCAD_JOB_TIMEOUT_MS", default_value_t = 30_000)]
     pub job_timeout_ms: u64,
 
     /// Maximum request body size in bytes
-    #[arg(long, env = "VIBECAD_MAX_BODY_BYTES", default_value_t = 4 * 1024 * 1024)]
+    #[arg(long, env = "SCRATCHCAD_MAX_BODY_BYTES", default_value_t = 4 * 1024 * 1024)]
     pub max_body_bytes: usize,
 
     /// Maximum Rhai script size in bytes
-    #[arg(long, env = "VIBECAD_MAX_SCRIPT_BYTES", default_value_t = 64 * 1024)]
+    #[arg(long, env = "SCRATCHCAD_MAX_SCRIPT_BYTES", default_value_t = 64 * 1024)]
     pub max_script_bytes: usize,
 
     /// Maximum number of Rhai operations a script may execute
     #[arg(
         long,
-        env = "VIBECAD_MAX_SCRIPT_OPERATIONS",
+        env = "SCRATCHCAD_MAX_SCRIPT_OPERATIONS",
         default_value_t = 1_000_000
     )]
     pub max_script_operations: u64,
 
     /// Maximum number of unique nodes in the math graph a script produces
-    #[arg(long, env = "VIBECAD_MAX_NODES", default_value_t = 100_000)]
+    #[arg(long, env = "SCRATCHCAD_MAX_NODES", default_value_t = 100_000)]
     pub max_nodes: usize,
 
     /// Maximum number of points (or intervals) per evaluation request
-    #[arg(long, env = "VIBECAD_MAX_EVAL_POINTS", default_value_t = 100_000)]
+    #[arg(long, env = "SCRATCHCAD_MAX_EVAL_POINTS", default_value_t = 100_000)]
     pub max_eval_points: usize,
 
     /// Maximum width / height of a 2D raster image
-    #[arg(long, env = "VIBECAD_MAX_IMAGE_SIZE_2D", default_value_t = 4096)]
+    #[arg(long, env = "SCRATCHCAD_MAX_IMAGE_SIZE_2D", default_value_t = 4096)]
     pub max_image_size_2d: u32,
 
     /// Maximum width / height / depth of a 3D raster image
-    #[arg(long, env = "VIBECAD_MAX_IMAGE_SIZE_3D", default_value_t = 2048)]
+    #[arg(long, env = "SCRATCHCAD_MAX_IMAGE_SIZE_3D", default_value_t = 2048)]
     pub max_image_size_3d: u32,
 
     /// Maximum octree depth for meshing
-    #[arg(long, env = "VIBECAD_MAX_MESH_DEPTH", default_value_t = 10)]
+    #[arg(long, env = "SCRATCHCAD_MAX_MESH_DEPTH", default_value_t = 10)]
     pub max_mesh_depth: u8,
 
     /// Maximum number of triangles in an exported mesh
-    #[arg(long, env = "VIBECAD_MAX_MESH_TRIANGLES", default_value_t = 4_000_000)]
+    #[arg(long, env = "SCRATCHCAD_MAX_MESH_TRIANGLES", default_value_t = 4_000_000)]
     pub max_mesh_triangles: usize,
 }
 
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn validation() {
         let parse = |args: &[&str]| {
-            Config::parse_from(std::iter::once("vibecad").chain(args.iter().copied()))
+            Config::parse_from(std::iter::once("scratchcad").chain(args.iter().copied()))
         };
         assert!(parse(&[]).validate().is_ok());
         assert!(parse(&["--max-nodes", "0"]).validate().is_err());

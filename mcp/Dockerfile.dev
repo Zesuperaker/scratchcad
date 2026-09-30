@@ -16,10 +16,10 @@ ENV UV_PROJECT_ENVIRONMENT=/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
     PATH=/venv/bin:$PATH \
-    VIBECAD_MCP_TRANSPORT=http \
-    VIBECAD_MCP_HOST=0.0.0.0 \
-    VIBECAD_MCP_PORT=8000 \
-    VIBECAD_MCP_OUTPUT_DIR=/output
+    SCRATCHCAD_MCP_TRANSPORT=http \
+    SCRATCHCAD_MCP_HOST=0.0.0.0 \
+    SCRATCHCAD_MCP_PORT=8000 \
+    SCRATCHCAD_MCP_OUTPUT_DIR=/output
 
 # Install dependencies first so they are cached independently of our sources.
 COPY pyproject.toml uv.lock .python-version README.md ./
@@ -32,4 +32,4 @@ RUN uv sync --locked
 EXPOSE 8000
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=5 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
-CMD ["vibecad-mcp"]
+CMD ["scratchcad-mcp"]

@@ -1,11 +1,11 @@
-# vibecad
+# scratchcad
 
 Script-driven solid modelling over HTTP, plus an MCP server so AI assistants
 can use it.
 
 | directory | what it is |
 |---|---|
-| [`server/`](server) | The vibecad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
+| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
 | [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's five endpoints as tools, so a model can write a script, look at renders, measure the part and export an STL. |
 
 The two are independent: the MCP server talks to the service over HTTP, so it
@@ -15,7 +15,7 @@ works with a local build, the dev containers, or a deployed instance.
 
 ```sh
 docker compose up --build        # or `docker compose watch` to reload on edits
-claude mcp add --transport http vibecad http://localhost:8000/mcp
+claude mcp add --transport http scratchcad http://localhost:8000/mcp
 ```
 
 `compose.yaml` runs both dev images:
@@ -29,7 +29,7 @@ Exported STL files appear in `./output`. With `docker compose watch`, edits
 under `server/src` or `mcp/src` restart the affected container (the Rust
 side recompiles in a few seconds), and changes to `Cargo.toml`, `Cargo.lock`,
 `pyproject.toml` or `uv.lock` rebuild its image. To require an API token, put
-`VIBECAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
+`SCRATCHCAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
 
 Run the MCP checks inside its container with
 `docker compose run --rm mcp uv run pytest`.
@@ -38,7 +38,7 @@ Run the MCP checks inside its container with
 
 ```sh
 cd server && cargo run --release                                  # http://localhost:8080
-claude mcp add vibecad -- uv run --project "$PWD/mcp" vibecad-mcp   # from the repo root
+claude mcp add scratchcad -- uv run --project "$PWD/mcp" scratchcad-mcp   # from the repo root
 ```
 
 ## Then
@@ -61,6 +61,6 @@ Dependabot proposes updates weekly. After any dependency change, regenerate
 
 ## License
 
-vibecad is licensed under the [Apache License 2.0](LICENSE). Its dependencies,
+scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies,
 including [Fidget](https://github.com/mkeeter/fidget) (MPL-2.0), are listed
 with their licenses in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).

@@ -14,13 +14,13 @@ RUN mkdir src \
 COPY src ./src
 RUN touch src/main.rs src/lib.rs \
  && cargo build --release --locked \
- && cp target/release/vibecad /vibecad
+ && cp target/release/scratchcad /scratchcad
 
 # Distroless: glibc + libgcc only, no shell, runs as uid 65532.
 FROM gcr.io/distroless/cc-debian12:nonroot
-COPY --from=build /vibecad /usr/local/bin/vibecad
-ENV VIBECAD_LISTEN=0.0.0.0:8080 \
-    VIBECAD_LOG_FORMAT=json
+COPY --from=build /scratchcad /usr/local/bin/scratchcad
+ENV SCRATCHCAD_LISTEN=0.0.0.0:8080 \
+    SCRATCHCAD_LOG_FORMAT=json
 EXPOSE 8080
 USER nonroot:nonroot
-ENTRYPOINT ["/usr/local/bin/vibecad"]
+ENTRYPOINT ["/usr/local/bin/scratchcad"]

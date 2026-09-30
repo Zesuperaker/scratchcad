@@ -1,7 +1,7 @@
 [project]
-name = "vibecad-mcp"
+name = "scratchcad-mcp"
 version = "0.1.0"
-description = "MCP server exposing the vibecad HTTP API as tools"
+description = "MCP server exposing the scratchcad HTTP API as tools"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = "==3.14.*"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-vibecad-mcp = "vibecad_mcp.server:main"
+scratchcad-mcp = "scratchcad_mcp.server:main"
 
 [dependency-groups]
 dev = [
@@ -28,7 +28,7 @@ requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/vibecad_mcp"]
+packages = ["src/scratchcad_mcp"]
 
 [tool.ruff]
 line-length = 100
@@ -47,10 +47,10 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "--strict-markers"
-markers = ["integration: needs a real vibecad binary (skipped when it is not built)"]
+markers = ["integration: needs a real scratchcad binary (skipped when it is not built)"]
 
 [tool.coverage.run]
-source = ["vibecad_mcp"]
+source = ["scratchcad_mcp"]
 branch = true
 
 [tool.coverage.report]

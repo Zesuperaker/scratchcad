@@ -1,17 +1,17 @@
-# Local development stack: the vibecad service plus the MCP server over HTTP.
+# Local development stack: the scratchcad service plus the MCP server over HTTP.
 #
 #   docker compose up --build          # start both
 #   docker compose watch               # start both and reload on source changes
 #
 # Then point an MCP client at http://localhost:8000/mcp, e.g.
-#   claude mcp add --transport http vibecad http://localhost:8000/mcp
+#   claude mcp add --transport http scratchcad http://localhost:8000/mcp
 # STL files the model exports appear in ./output.
 #
 # Both ports are published on 127.0.0.1 only. The service runs without an API
-# token unless you put VIBECAD_API_TOKEN=<16+ characters> in a .env file next
+# token unless you put SCRATCHCAD_API_TOKEN=<16+ characters> in a .env file next
 # to this one; both containers read it.
 
-name: vibecad
+name: scratchcad
 
 services:
   server:
@@ -44,7 +44,7 @@ services:
       - "127.0.0.1:8000:8000"
     env_file: *env
     environment:
-      VIBECAD_URL: http://server:8080
+      SCRATCHCAD_URL: http://server:8080
     volumes:
       - ./output:/output
     depends_on:

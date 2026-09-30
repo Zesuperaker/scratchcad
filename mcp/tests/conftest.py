@@ -9,8 +9,8 @@ import httpx2
 import pytest
 from fastmcp import Client, FastMCP
 
-from vibecad_mcp.config import Settings
-from vibecad_mcp.server import create_server
+from scratchcad_mcp.config import Settings
+from scratchcad_mcp.server import create_server
 
 # Smallest valid PNG header; the tools pass image bytes through untouched.
 PNG = b"\x89PNG\r\n\x1a\nfake"
@@ -19,8 +19,8 @@ Handler = Callable[[httpx2.Request], httpx2.Response]
 
 
 @dataclass
-class FakeVibecad:
-    """Stands in for the vibecad HTTP API and records every request it gets."""
+class FakeScratchcad:
+    """Stands in for the scratchcad HTTP API and records every request it gets."""
 
     requests: list[httpx2.Request] = field(default_factory=list)
     handler: Handler | None = None
@@ -45,7 +45,7 @@ class FakeVibecad:
 
 
 def default_response(request: httpx2.Request) -> httpx2.Response:
-    """A plausible success response for each vibecad endpoint."""
+    """A plausible success response for each scratchcad endpoint."""
     path = request.url.path
     if path == "/v1/scripts/validate":
         return httpx2.Response(200, json={"nodes": 9, "output": ["hi"], "compile_ms": 0.8})
@@ -70,7 +70,7 @@ def default_response(request: httpx2.Request) -> httpx2.Response:
     )
 
 
-def vibecad_error(status: int, code: str, message: str) -> Handler:
+def scratchcad_error(status: int, code: str, message: str) -> Handler:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(status, json={"error": {"code": code, "message": message}})
 
@@ -79,27 +79,27 @@ def vibecad_error(status: int, code: str, message: str) -> Handler:
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the developer's (or the dev container's) VIBECAD_* settings out of tests.
+    """Keep the developer's (or the dev container's) SCRATCHCAD_* settings out of tests.
 
-    VIBECAD_BIN is test configuration (see test_integration.py), so it stays.
+    SCRATCHCAD_BIN is test configuration (see test_integration.py), so it stays.
     """
     for name in list(os.environ):
-        if name.startswith("VIBECAD_") and name != "VIBECAD_BIN":
+        if name.startswith("SCRATCHCAD_") and name != "SCRATCHCAD_BIN":
             monkeypatch.delenv(name)
 
 
 @pytest.fixture
-def fake() -> FakeVibecad:
-    return FakeVibecad()
+def fake() -> FakeScratchcad:
+    return FakeScratchcad()
 
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(url="http://vibecad.test", output_dir=tmp_path.resolve())
+    return Settings(url="http://scratchcad.test", output_dir=tmp_path.resolve())
 
 
 @pytest.fixture
-def server(settings: Settings, fake: FakeVibecad) -> FastMCP:
+def server(settings: Settings, fake: FakeScratchcad) -> FastMCP:
     return create_server(settings, fake.transport())
 
 
