@@ -71,7 +71,9 @@ class Settings:
             try:
                 port = int(raw_port)
             except ValueError:
-                raise ConfigError(f"SCRATCHCAD_MCP_PORT must be an integer, got {raw_port!r}") from None
+                raise ConfigError(
+                    f"SCRATCHCAD_MCP_PORT must be an integer, got {raw_port!r}"
+                ) from None
             if not 1 <= port <= 65535:
                 raise ConfigError(f"SCRATCHCAD_MCP_PORT must be between 1 and 65535, got {port}")
 
