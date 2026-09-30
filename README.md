@@ -1,22 +1,36 @@
 # scratchcad
 
-Script-driven solid modelling over HTTP, plus an MCP server so AI assistants
+> [!WARNING]
+> scratchcad is under active development. APIs, tools and script syntax may
+> change without notice, and things may break between commits.
+
+scratchcad is a rust based solid modelling API, plus an MCP server so AI assistants
 can use it.
 
-| directory | what it is |
-|---|---|
-| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
-| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's five endpoints as tools, so a model can write a script, look at renders, measure the part and export an STL. |
-
-The two are independent: the MCP server talks to the service over HTTP, so it
-works with a local build, the dev containers, or a deployed instance.
-
-## Quick start with Docker
+## Quick start (requires docker)
 
 ```sh
 docker compose up --build        # or `docker compose watch` to reload on edits
-claude mcp add --transport http scratchcad http://localhost:8000/mcp
 ```
+
+Then add the MCP server (`http://localhost:8000/mcp`) to your agent:
+
+```sh
+# Claude Code
+claude mcp add --transport http scratchcad http://localhost:8000/mcp
+
+# OpenAI Codex CLI
+codex mcp add scratchcad --url http://localhost:8000/mcp
+
+# Gemini CLI
+gemini mcp add --transport http scratchcad http://localhost:8000/mcp
+
+# VS Code (GitHub Copilot agent mode)
+code --add-mcp '{"name":"scratchcad","type":"http","url":"http://localhost:8000/mcp"}'
+```
+
+For other clients, point them at `http://localhost:8000/mcp` using the
+streamable HTTP transport.
 
 `compose.yaml` runs both dev images:
 
@@ -34,18 +48,15 @@ side recompiles in a few seconds), and changes to `Cargo.toml`, `Cargo.lock`,
 Run the MCP checks inside its container with
 `docker compose run --rm mcp uv run pytest`.
 
-## Quick start without Docker
+## Architecture 
 
-```sh
-cd server && cargo run --release                                  # http://localhost:8080
-claude mcp add scratchcad -- uv run --project "$PWD/mcp" scratchcad-mcp   # from the repo root
-```
+| directory | what it is |
+|---|---|
+| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
+| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's five endpoints as tools, so a model can write a script, look at renders, measure the part and export an STL. |
 
-## Then
-
-Ask for a part, e.g. *"make a 20 mm cube with a 5 mm hole through it and
-export it as cube.stl"*. See [`mcp/README.md`](mcp/README.md) for other
-clients and configuration.
+The two are independent: the MCP server talks to the service over HTTP, so it
+works with a local build, the dev containers, or a deployed instance.
 
 ## Development
 
@@ -61,6 +72,9 @@ Dependabot proposes updates weekly. After any dependency change, regenerate
 
 ## License
 
-scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies,
-including [Fidget](https://github.com/mkeeter/fidget) (MPL-2.0), are listed
+scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies, are listed
 with their licenses in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
+
+## Shoutout 
+
+A huge shoutout to Matt Keeter the developer of [Fidget](https://github.com/mkeeter/fidget), scratchcad uses fidget as the core modeling kernal and this project would not be possible without fidget.
