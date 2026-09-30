@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
 
+# please note that this Dockerfile has not be tested in an acctual production environment, and is provided as a reference 
+# for those who want to run scratchcad on a server. It is not guaranteed to be secure or performant, and should be used at your own risk.
+# Please open an issue or PR if this Dockerfile does not work for you, or if you have suggestions for improvements.
+
 FROM rust:1.98-bookworm AS build
 WORKDIR /src
 
