@@ -27,6 +27,9 @@ class BinaryResult:
     data: bytes
     compute_ms: float | None
     triangles: int | None = None
+    # The request worked, but the result may not be what was meant (for
+    # example a mesh cut open where the part leaves the meshed region).
+    warnings: tuple[str, ...] = ()
 
 
 class ScratchcadClient:
@@ -88,6 +91,7 @@ def _binary(response: httpx2.Response) -> BinaryResult:
         data=response.content,
         compute_ms=_header_number(response, "x-compute-ms", float),
         triangles=_header_number(response, "x-triangle-count", int),
+        warnings=tuple(response.headers.get_list("x-warning")),
     )
 
 
@@ -105,6 +109,14 @@ def _header_number[N: (int, float)](
 
 def _error_from(response: httpx2.Response) -> ScratchcadError:
     status = response.status_code
+    # Server-side failures hide their details from clients but log them under
+    # the request id, so pass it on: it is how the logs are searched.
+    request_id = response.headers.get("x-request-id")
+    trace = (
+        f" (scratchcad logged the details under request id {request_id})"
+        if status >= 500 and request_id
+        else ""
+    )
     code = message = None
     try:
         error = response.json()["error"]
@@ -114,7 +126,9 @@ def _error_from(response: httpx2.Response) -> ScratchcadError:
 
     if code is None:
         excerpt = response.text[:_MAX_BODY_EXCERPT].strip() or response.reason_phrase
-        return ScratchcadError(f"scratchcad returned HTTP {status}: {excerpt}", status=status)
+        return ScratchcadError(
+            f"scratchcad returned HTTP {status}: {excerpt}{trace}", status=status
+        )
 
     text = f"{code}: {message}"
     if code == "unauthorized":
@@ -123,4 +137,4 @@ def _error_from(response: httpx2.Response) -> ScratchcadError:
         text += " (the server is busy; retry in a moment)"
     elif code == "limit_exceeded":
         text += " (reduce the size, resolution or complexity of the request)"
-    return ScratchcadError(text, code=code, status=status)
+    return ScratchcadError(text + trace, code=code, status=status)

@@ -9,12 +9,14 @@ import httpx2
 from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.lifespan import lifespan
+from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
+from mcp_types import TextContent
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-from .client import ScratchcadClient, ScratchcadError
+from .client import BinaryResult, ScratchcadClient, ScratchcadError
 from .config import ConfigError, Settings
 
 GUIDE = """\
@@ -56,6 +58,11 @@ cover the part's corners: use at least the distance from center to the \
 farthest point (about 1.75 times the half-width for a cube). A flat, brightly \
 lit cut face that is not part of the design means the view is too small.
 
+Renders skip samples where the field is NaN or infinite; export_stl fails \
+with non_finite_field when the mesher meets one. Renders and exports also \
+return warnings: where the field is NaN or infinite in the view, and which \
+sides of the region the shape reaches.
+
 Workflow: validate_script first to catch errors cheaply, then render_3d to \
 see the shape, render_2d for a cross-section at z = 0 (move or rotate the \
 shape to slice elsewhere), evaluate to check exact dimensions (a point is \
@@ -83,6 +90,11 @@ class StlExport(BaseModel):
     bytes: int
     triangles: int | None
     compute_ms: float | None
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Observations that did not stop the export, such as the "
+        "sides of the region the shape reaches.",
+    )
 
 
 def create_server(
@@ -180,7 +192,7 @@ def create_server(
         ] = (0.0, 0.0),
         half_size: HalfSize = 1.0,
         evaluator: Evaluator = None,
-    ) -> Image:
+    ) -> ToolResult:
         """Render the cross-section at z = 0 as a PNG.
 
         Use it to see inside a part: holes, wall thickness and internal
@@ -199,7 +211,7 @@ def create_server(
                 "evaluator": evaluator,
             },
         )
-        return Image(data=result.data, format="png")
+        return _image(result)
 
     @mcp.tool(annotations=read_only)
     async def render_3d(
@@ -224,7 +236,7 @@ def create_server(
             Field(ge=1, description="Voxels along the view axis. Defaults to max(width, height)."),
         ] = None,
         evaluator: Evaluator = None,
-    ) -> Image:
+    ) -> ToolResult:
         """Render a shaded 3D view of the shape as a PNG with a transparent background.
 
         With no rotation the camera looks along -z with +y up. The default
@@ -248,7 +260,7 @@ def create_server(
                 "evaluator": evaluator,
             },
         )
-        return Image(data=result.data, format="png")
+        return _image(result)
 
     @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True})
     async def export_stl(
@@ -296,6 +308,7 @@ def create_server(
             bytes=len(result.data),
             triangles=result.triangles,
             compute_ms=result.compute_ms,
+            warnings=list(result.warnings),
         )
 
     @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
@@ -304,6 +317,13 @@ def create_server(
         return PlainTextResponse("ok")
 
     return mcp
+
+
+def _image(result: BinaryResult) -> ToolResult:
+    """The rendered PNG, followed by a text block for each warning."""
+    image = Image(data=result.data, format="png").to_image_content()
+    warnings = [TextContent(type="text", text=f"Warning: {w}") for w in result.warnings]
+    return ToolResult(content=[image, *warnings])
 
 
 def _drop_none(body: dict[str, Any]) -> dict[str, Any]:

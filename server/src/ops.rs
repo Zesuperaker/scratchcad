@@ -2,19 +2,33 @@
 //! rasterization, and meshing to STL.  Everything here is synchronous and
 //! meant to run inside a [`Jobs`](crate::jobs::Jobs) slot.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use fidget::{
     eval::{Function, MathFunction},
     render::{CancelToken, ImageSize, RenderHints, ThreadPool, VoxelSize},
-    shape::{BoundShape, Shape},
+    shape::{BoundShape, Shape, ShapeBulkEval},
     types::{Grad, Interval},
 };
-use nalgebra::{Matrix3, Matrix4};
+use nalgebra::{Matrix3, Matrix4, Point3};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::ApiError, script::Compiled};
+use crate::{
+    error::ApiError,
+    jobs::{Stage, panic_message},
+    script::Compiled,
+};
 
 /// Bulk evaluators work in chunks of this many points
 const EVAL_CHUNK: usize = 16 * 1024;
+
+/// Samples per axis when a render checks its view for NaN
+const RENDER_PROBE_2D: usize = 129;
+const RENDER_PROBE_3D: usize = 65;
+
+/// Most samples per axis on each face when a mesh checks for clipping
+const MAX_FACE_PROBE: usize = 257;
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -40,7 +54,8 @@ pub fn dispatch<J: ShapeJob>(
     script: &Compiled,
     job: J,
 ) -> Result<J::Output, ApiError> {
-    let bad = |e| ApiError::Internal(format!("building shape: {e}"));
+    // Only the graph the script produced can make this fail
+    let bad = |e| ApiError::Unprocessable(format!("could not build the shape: {e}"));
     match evaluator {
         Evaluator::Jit => {
             job.run(fidget::jit::JitShape::new(&script.ctx, script.root).map_err(bad)?)
@@ -56,6 +71,214 @@ fn bind<F: Function>(shape: Shape<F>) -> Result<BoundShape<'static, F, f32>, Api
 
 fn eval_err(e: impl std::fmt::Display) -> ApiError {
     ApiError::Unprocessable(format!("evaluation failed: {e}"))
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Probes: sampling the field on a grid to explain failures and spot mistakes
+
+/// Coordinate `i` of `n` evenly spaced samples across `[-1, 1]` (0 when `n == 1`)
+fn grid_coord(i: usize, n: usize) -> f32 {
+    if n <= 1 {
+        0.0
+    } else {
+        -1.0 + 2.0 * i as f32 / (n - 1) as f32
+    }
+}
+
+/// Formats a model-space number compactly: at most 4 decimals, no trailing zeros
+fn num(v: f32) -> String {
+    let s = format!("{v:.4}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".into() } else { s.into() }
+}
+
+fn point(p: Point3<f32>) -> String {
+    format!("({}, {}, {})", num(p.x), num(p.y), num(p.z))
+}
+
+/// The region `world_to_model` maps the `[-1, 1]` cube onto, for messages.
+/// ASCII only, because messages are also sent as header values.
+fn region(world_to_model: &Matrix4<f32>) -> String {
+    let c = world_to_model.transform_point(&Point3::origin());
+    let h = world_to_model
+        .transform_point(&Point3::new(1.0, 0.0, 0.0))
+        .x
+        - c.x;
+    format!("center {} +/- {}", point(c), num(h))
+}
+
+/// Lifts a 2D view transform to 3D, leaving z unchanged
+fn embed_2d(m: &Matrix3<f32>) -> Matrix4<f32> {
+    let mut out = Matrix4::identity();
+    out.fixed_view_mut::<2, 2>(0, 0)
+        .copy_from(&m.fixed_view::<2, 2>(0, 0));
+    out[(0, 3)] = m[(0, 2)];
+    out[(1, 3)] = m[(1, 2)];
+    out
+}
+
+/// A sample where the field is NaN or infinite
+struct NonFinite {
+    /// Model-space position
+    at: Point3<f32>,
+    value: f32,
+}
+
+impl std::fmt::Display for NonFinite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let what = if self.value.is_nan() {
+            "NaN"
+        } else {
+            "infinite"
+        };
+        write!(f, "the field is {what} at {}", point(self.at))
+    }
+}
+
+/// Searches `layers` z-slices of an `n` x `n` grid over the `[-1, 1]` view
+/// cube (mapped to model space by `world_to_model`, exactly as the mesher and
+/// renderers map it) for a sample where the field is NaN or infinite.
+///
+/// Returns `Ok(None)` if there is none, or if `cancel` is tripped first.
+fn find_non_finite<F>(
+    shape: &Shape<F>,
+    world_to_model: &Matrix4<f32>,
+    n: usize,
+    layers: usize,
+    pool: &ThreadPool,
+    cancel: &CancelToken,
+) -> Result<Option<NonFinite>, ApiError>
+where
+    F: Function + MathFunction + RenderHints + Clone,
+{
+    let tape = shape.float_slice_tape(Default::default());
+    let rows_per_chunk = (EVAL_CHUNK / n).max(1);
+    let search_layer = |eval: &mut ShapeBulkEval<F::FloatSliceEval>,
+                        k: usize|
+     -> Option<Result<NonFinite, ApiError>> {
+        if cancel.is_cancelled() {
+            return None;
+        }
+        let z = grid_coord(k, layers);
+        let (mut xs, mut ys, mut zs) = (vec![], vec![], vec![]);
+        for first_row in (0..n).step_by(rows_per_chunk) {
+            xs.clear();
+            ys.clear();
+            zs.clear();
+            for j in first_row..(first_row + rows_per_chunk).min(n) {
+                for i in 0..n {
+                    xs.push(grid_coord(i, n));
+                    ys.push(grid_coord(j, n));
+                    zs.push(z);
+                }
+            }
+            let out = match eval.eval_with_transform(&tape, &xs, &ys, &zs, world_to_model) {
+                Ok(out) => out,
+                Err(e) => return Some(Err(eval_err(e))),
+            };
+            if let Some(i) = out.iter().position(|v| !v.is_finite()) {
+                let at = world_to_model.transform_point(&Point3::new(xs[i], ys[i], zs[i]));
+                return Some(Ok(NonFinite { at, value: out[i] }));
+            }
+        }
+        None
+    };
+    pool.run(|| {
+        (0..layers)
+            .into_par_iter()
+            .map_init(Shape::<F>::new_float_slice_eval, search_layer)
+            .find_map_any(|r| r)
+    })
+    .transpose()
+}
+
+/// What the field looks like on the six faces of the meshed region
+struct Boundary {
+    /// Faces with at least one sample inside the shape
+    touched: Vec<&'static str>,
+    /// Samples inside the shape, over all faces
+    inside: usize,
+    /// Samples taken, over all faces
+    total: usize,
+}
+
+fn check_boundary<F>(
+    shape: &Shape<F>,
+    world_to_model: &Matrix4<f32>,
+    n: usize,
+) -> Result<Boundary, ApiError>
+where
+    F: Function + MathFunction + RenderHints + Clone,
+{
+    const FACES: [(&str, usize, f32); 6] = [
+        ("-x", 0, -1.0),
+        ("+x", 0, 1.0),
+        ("-y", 1, -1.0),
+        ("+y", 1, 1.0),
+        ("-z", 2, -1.0),
+        ("+z", 2, 1.0),
+    ];
+    let tape = shape.float_slice_tape(Default::default());
+    let mut eval = Shape::<F>::new_float_slice_eval();
+    let mut out = Boundary {
+        touched: vec![],
+        inside: 0,
+        total: 0,
+    };
+    let mut coords: [Vec<f32>; 3] = Default::default();
+    for (name, axis, side) in FACES {
+        let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
+        coords.iter_mut().for_each(Vec::clear);
+        for a in 0..n {
+            for b in 0..n {
+                coords[axis].push(side);
+                coords[u].push(grid_coord(a, n));
+                coords[v].push(grid_coord(b, n));
+            }
+        }
+        let mut inside = 0;
+        for c in 0..coords[0].len().div_ceil(EVAL_CHUNK) {
+            let r = c * EVAL_CHUNK..((c + 1) * EVAL_CHUNK).min(coords[0].len());
+            let vals = eval
+                .eval_with_transform(
+                    &tape,
+                    &coords[0][r.clone()],
+                    &coords[1][r.clone()],
+                    &coords[2][r.clone()],
+                    world_to_model,
+                )
+                .map_err(eval_err)?;
+            inside += vals.iter().filter(|v| **v < 0.0).count();
+        }
+        if inside > 0 {
+            out.touched.push(name);
+        }
+        out.inside += inside;
+        out.total += n * n;
+    }
+    Ok(out)
+}
+
+/// A warning for renders whose view contains NaN or infinite values: the
+/// renderers skip such samples without reporting them, while the mesher
+/// panics on them.
+fn render_nan_warning<F>(
+    shape: &Shape<F>,
+    world_to_model: &Matrix4<f32>,
+    n: usize,
+    layers: usize,
+    pool: &ThreadPool,
+    cancel: &CancelToken,
+) -> Result<Vec<String>, ApiError>
+where
+    F: Function + MathFunction + RenderHints + Clone,
+{
+    Ok(
+        find_non_finite(shape, world_to_model, n, layers, pool, cancel)?
+            .map(|bad| format!("{bad}, inside this view"))
+            .into_iter()
+            .collect(),
+    )
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,10 +383,16 @@ pub struct Raster2d<'a> {
     pub cancel: CancelToken,
 }
 
-impl ShapeJob for Raster2d<'_> {
+/// A rendered image and anything about it worth telling the caller
+pub struct Rendered {
     /// RGBA8 pixels, row-major
-    type Output = Vec<u8>;
-    fn run<F>(self, shape: Shape<F>) -> Result<Vec<u8>, ApiError>
+    pub rgba: Vec<u8>,
+    pub warnings: Vec<String>,
+}
+
+impl ShapeJob for Raster2d<'_> {
+    type Output = Rendered;
+    fn run<F>(self, shape: Shape<F>) -> Result<Rendered, ApiError>
     where
         F: Function + MathFunction + RenderHints + Clone,
     {
@@ -179,16 +408,27 @@ impl ShapeJob for Raster2d<'_> {
         };
         let eval = EvalConfig {
             threads,
-            cancel: self.cancel,
+            cancel: self.cancel.clone(),
             ..Default::default()
         };
-        let img = render(bind(shape)?, &cfg, &eval).ok_or(ApiError::Timeout)?;
+        let img = render(bind(shape.clone())?, &cfg, &eval).ok_or_else(ApiError::cancelled)?;
         let rgba = match self.mode {
             Mode2d::Mono => effects::to_rgba_bitmap(img, false, threads),
             Mode2d::Sdf => effects::to_rgba_distance(img, threads),
             Mode2d::Debug => effects::to_debug_bitmap(img, threads),
         };
-        Ok(rgba.into_iter().flatten().collect())
+        let warnings = render_nan_warning(
+            &shape,
+            &embed_2d(&self.world_to_model),
+            RENDER_PROBE_2D,
+            1,
+            self.pool,
+            &self.cancel,
+        )?;
+        Ok(Rendered {
+            rgba: rgba.into_iter().flatten().collect(),
+            warnings,
+        })
     }
 }
 
@@ -218,9 +458,9 @@ pub struct Raster3d<'a> {
 }
 
 impl ShapeJob for Raster3d<'_> {
-    /// RGBA8 pixels, row-major; background pixels are transparent
-    type Output = Vec<u8>;
-    fn run<F>(self, shape: Shape<F>) -> Result<Vec<u8>, ApiError>
+    /// Background pixels are transparent
+    type Output = Rendered;
+    fn run<F>(self, shape: Shape<F>) -> Result<Rendered, ApiError>
     where
         F: Function + MathFunction + RenderHints + Clone,
     {
@@ -238,9 +478,9 @@ impl ShapeJob for Raster3d<'_> {
             cancel: self.cancel.clone(),
             ..Default::default()
         };
-        let image = render(bind(shape)?, &cfg, &eval).ok_or(ApiError::Timeout)?;
+        let image = render(bind(shape.clone())?, &cfg, &eval).ok_or_else(ApiError::cancelled)?;
         if self.cancel.is_cancelled() {
-            return Err(ApiError::Timeout);
+            return Err(ApiError::cancelled());
         }
 
         let image = if self.denoise && self.mode != Mode3d::Heightmap {
@@ -289,7 +529,18 @@ impl ShapeJob for Raster3d<'_> {
                     .collect()
             }
         };
-        Ok(out)
+        let warnings = render_nan_warning(
+            &shape,
+            &self.world_to_model,
+            RENDER_PROBE_3D,
+            RENDER_PROBE_3D,
+            self.pool,
+            &self.cancel,
+        )?;
+        Ok(Rendered {
+            rgba: out,
+            warnings,
+        })
     }
 }
 
@@ -302,12 +553,15 @@ pub struct MeshJob<'a> {
     pub max_triangles: usize,
     pub pool: &'a ThreadPool,
     pub cancel: CancelToken,
+    /// Reports progress, so that a timeout can say which stage ran out
+    pub set_stage: &'a dyn Fn(Stage),
 }
 
 pub struct StlOutput {
     pub bytes: Vec<u8>,
     pub triangles: usize,
     pub vertices: usize,
+    pub warnings: Vec<String>,
 }
 
 impl ShapeJob for MeshJob<'_> {
@@ -322,13 +576,21 @@ impl ShapeJob for MeshJob<'_> {
             threads: Some(self.pool),
             cancel: self.cancel.clone(),
         };
-        let octree =
-            fidget::mesh::Octree::build(&bind(shape)?, &settings).ok_or(ApiError::Timeout)?;
+        let bound = bind(shape.clone())?;
+        // Fidget's mesher asserts that every sample is either inside or
+        // outside, so a NaN in the field makes it panic.  Catch that here,
+        // where the shape is still at hand to find out why.
+        let built = catch_unwind(AssertUnwindSafe(|| {
+            fidget::mesh::Octree::build(&bound, &settings).map(|octree| octree.walk_dual())
+        }));
+        let mesh = match built {
+            Ok(Some(mesh)) => mesh,
+            Ok(None) => return Err(ApiError::cancelled()),
+            Err(panic) => return Err(self.diagnose(&shape, &panic_message(panic))),
+        };
         if self.cancel.is_cancelled() {
-            return Err(ApiError::Timeout);
+            return Err(ApiError::cancelled());
         }
-        let mesh = octree.walk_dual();
-        drop(octree);
 
         let triangles = mesh.triangles.len();
         if triangles > self.max_triangles {
@@ -338,6 +600,29 @@ impl ShapeJob for MeshJob<'_> {
                 self.max_triangles
             )));
         }
+
+        (self.set_stage)(Stage::Checking);
+        let face_samples = ((1usize << self.depth) + 1).min(MAX_FACE_PROBE);
+        let boundary = check_boundary(&shape, &self.world_to_model, face_samples)?;
+        let region = region(&self.world_to_model);
+        if triangles == 0 {
+            return Err(ApiError::EmptyMesh(format!(
+                "meshing the region {region} at depth {} produced no triangles; \
+                 {} of {} samples on the region's boundary are inside the shape",
+                self.depth, boundary.inside, boundary.total
+            )));
+        }
+        let mut warnings = vec![];
+        if !boundary.touched.is_empty() {
+            warnings.push(format!(
+                "the shape reaches the boundary of the meshed region {region} on its {} \
+                 side(s); {} of {} samples on the region's boundary are inside the shape",
+                boundary.touched.join(", "),
+                boundary.inside,
+                boundary.total
+            ));
+        }
+
         // Binary STL: 80-byte header + u32 count + 50 bytes per triangle
         let mut bytes = Vec::with_capacity(84 + 50 * triangles);
         mesh.write_stl(&mut bytes)
@@ -346,7 +631,35 @@ impl ShapeJob for MeshJob<'_> {
             bytes,
             triangles,
             vertices: mesh.vertices.len(),
+            warnings,
         })
+    }
+}
+
+impl MeshJob<'_> {
+    /// Reports a mesher panic together with what the octree's grid holds:
+    /// either a sample where the field is NaN or infinite, or that none was found.
+    fn diagnose<F>(&self, shape: &Shape<F>, panic: &str) -> ApiError
+    where
+        F: Function + MathFunction + RenderHints + Clone,
+    {
+        (self.set_stage)(Stage::Checking);
+        let n = (1usize << self.depth) + 1;
+        let found = find_non_finite(shape, &self.world_to_model, n, n, self.pool, &self.cancel);
+        if self.cancel.is_cancelled() {
+            return ApiError::cancelled();
+        }
+        match found {
+            Ok(Some(bad)) => ApiError::NonFiniteField(format!(
+                "meshing failed: {bad}; the mesher panicked with \"{panic}\""
+            )),
+            Ok(None) => ApiError::MeshFailed(format!(
+                "meshing failed: the mesher panicked with \"{panic}\"; the field is finite \
+                 at all {n}x{n}x{n} corners of the depth-{} octree grid",
+                self.depth
+            )),
+            Err(e) => e,
+        }
     }
 }
 
@@ -438,7 +751,7 @@ mod tests {
                 cancel: cancelled(),
             },
         );
-        assert!(matches!(r, Err(ApiError::Timeout)));
+        assert!(matches!(r, Err(ApiError::Timeout(_))));
         let r = dispatch(
             Evaluator::Vm,
             &c,
@@ -452,7 +765,7 @@ mod tests {
                 cancel: cancelled(),
             },
         );
-        assert!(matches!(r, Err(ApiError::Timeout)));
+        assert!(matches!(r, Err(ApiError::Timeout(_))));
         let r = dispatch(
             Evaluator::Vm,
             &c,
@@ -462,9 +775,10 @@ mod tests {
                 max_triangles: usize::MAX,
                 pool: &pool,
                 cancel: cancelled(),
+                set_stage: &|_| {},
             },
         );
-        assert!(matches!(r, Err(ApiError::Timeout)));
+        assert!(matches!(r, Err(ApiError::Timeout(_))));
     }
 
     #[test]
@@ -484,7 +798,8 @@ mod tests {
                 cancel: CancelToken::new(),
             },
         )
-        .unwrap();
+        .unwrap()
+        .rgba;
         let px = |x: usize, y: usize| &rgba[(y * 32 + x) * 4..][..4];
         // The sphere's front (center) is the highest point: full brightness
         assert_eq!(px(16, 16), [255, 255, 255, 255]);
@@ -504,11 +819,149 @@ mod tests {
                 max_triangles: usize::MAX,
                 pool: &ThreadPool::Global,
                 cancel: CancelToken::new(),
+                set_stage: &|_| {},
             },
         )
         .unwrap();
         assert!(out.triangles > 0 && out.vertices > 0);
         assert_eq!(out.bytes.len(), 84 + 50 * out.triangles);
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    }
+
+    /// The sphere, except NaN (0/0) on the plane x = 0.25, which the depth-4
+    /// grid samples exactly
+    const NAN_SPHERE: &str = "(sqrt(x*x + y*y + z*z) - 0.5) * ((x - 0.25) / (x - 0.25))";
+
+    fn mesh(src: &str, depth: u8, world_to_model: Matrix4<f32>) -> Result<StlOutput, ApiError> {
+        let stages = std::sync::Mutex::new(vec![]);
+        let r = dispatch(
+            Evaluator::Jit,
+            &shape(src),
+            MeshJob {
+                depth,
+                world_to_model,
+                max_triangles: usize::MAX,
+                pool: &ThreadPool::Global,
+                cancel: CancelToken::new(),
+                set_stage: &|s| stages.lock().unwrap().push(s),
+            },
+        );
+        assert!(stages.lock().unwrap().iter().all(|s| *s == Stage::Checking));
+        r
+    }
+
+    #[test]
+    fn mesher_panic_on_nan_is_diagnosed() {
+        let Err(ApiError::NonFiniteField(m)) = mesh(NAN_SPHERE, 4, Matrix4::identity()) else {
+            panic!("expected the NaN to be reported")
+        };
+        assert!(
+            m.starts_with("meshing failed: the field is NaN at (0.25, "),
+            "{m}"
+        );
+        assert!(m.contains("; the mesher panicked with \""), "{m}");
+    }
+
+    #[test]
+    fn empty_meshes_report_the_region_and_boundary_samples() {
+        // Depth 4 samples each face on a 17 x 17 grid: 6 * 289 = 1734 samples
+        let far = "sqrt(square(x - 5) + y*y + z*z) - 0.5";
+        let Err(ApiError::EmptyMesh(m)) = mesh(far, 4, Matrix4::identity()) else {
+            panic!("expected an empty-mesh error")
+        };
+        assert_eq!(
+            m,
+            "meshing the region center (0, 0, 0) +/- 1 at depth 4 produced no triangles; \
+             0 of 1734 samples on the region's boundary are inside the shape"
+        );
+
+        let huge = "sqrt(x*x + y*y + z*z) - 10";
+        let Err(ApiError::EmptyMesh(m)) = mesh(huge, 4, Matrix4::identity()) else {
+            panic!("expected an empty-mesh error")
+        };
+        assert!(m.ends_with("1734 of 1734 samples on the region's boundary are inside the shape"));
+    }
+
+    #[test]
+    fn clipped_meshes_warn_and_name_the_sides() {
+        // Radius 1.2 pokes through all six faces of the unit cube
+        let out = mesh("sqrt(x*x + y*y + z*z) - 1.2", 4, Matrix4::identity()).unwrap();
+        assert_eq!(out.warnings.len(), 1);
+        assert!(
+            out.warnings[0].contains("on its -x, +x, -y, +y, -z, +z side(s); "),
+            "{:?}",
+            out.warnings
+        );
+        // A long bar along x is only cut at the x faces; messages use the
+        // model-space region
+        let m = crate::api::transform_3d([1.0, 0.0, 0.0], 2.0);
+        let out = mesh("max(abs(y), abs(z)) - 0.5", 4, m).unwrap();
+        assert!(
+            out.warnings[0].contains("center (1, 0, 0) +/- 2 on its -x, +x side(s)"),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn renders_warn_about_nan() {
+        let pool = ThreadPool::Global;
+        let r2 = |src| {
+            dispatch(
+                Evaluator::Jit,
+                &shape(src),
+                Raster2d {
+                    size: ImageSize::new(32, 32),
+                    mode: Mode2d::Mono,
+                    world_to_model: Matrix3::identity(),
+                    pool: &pool,
+                    cancel: CancelToken::new(),
+                },
+            )
+            .unwrap()
+        };
+        assert!(r2(SPHERE).warnings.is_empty());
+        let w = r2(NAN_SPHERE).warnings;
+        assert_eq!(w.len(), 1);
+        assert!(w[0].starts_with("the field is NaN at (0.25, "), "{w:?}");
+        assert!(w[0].ends_with("), inside this view"), "{w:?}");
+
+        let out = dispatch(
+            Evaluator::Vm,
+            &shape("sqrt(x*x + y*y + z*z) - 0.5 + 1 / x"),
+            Raster3d {
+                size: VoxelSize::new(16, 16, 16),
+                mode: Mode3d::Shaded,
+                denoise: true,
+                ssao: false,
+                world_to_model: Matrix4::identity(),
+                pool: &pool,
+                cancel: CancelToken::new(),
+            },
+        )
+        .unwrap();
+        assert!(
+            out.warnings[0].starts_with("the field is infinite at (0, "),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn number_and_region_formatting() {
+        assert_eq!(num(-12.0), "-12");
+        assert_eq!(num(0.25), "0.25");
+        assert_eq!(num(-0.00001), "0");
+        assert_eq!(num(1.0 / 3.0), "0.3333");
+        assert_eq!(
+            region(&crate::api::transform_3d([0.0, 0.0, -10.0], 22.0)),
+            "center (0, 0, -10) +/- 22"
+        );
+        let m = embed_2d(&crate::api::transform_2d([1.0, 2.0], 3.0));
+        assert_eq!(
+            m.transform_point(&Point3::new(1.0, 1.0, 0.5)),
+            Point3::new(4.0, 5.0, 0.5)
+        );
     }
 
     #[test]

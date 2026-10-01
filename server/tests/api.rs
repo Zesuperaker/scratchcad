@@ -78,6 +78,14 @@ fn assert_error(r: &(StatusCode, HeaderMap, Vec<u8>), status: StatusCode, code: 
     );
 }
 
+/// The message of an error response
+fn error_message(r: &(StatusCode, HeaderMap, Vec<u8>)) -> String {
+    json_body(&r.2)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Health and middleware
 
@@ -426,6 +434,7 @@ async fn stl_export() {
         let count = u32::from_le_bytes(b[80..84].try_into().unwrap()) as usize;
         assert_eq!(count, tris);
         assert_eq!(b.len(), 84 + 50 * tris);
+        assert!(!h.contains_key("x-warning"));
 
         // Every vertex lies on the sphere (radius 0.5), in model coordinates
         for t in 0..tris {
@@ -454,16 +463,69 @@ async fn stl_region_transform() {
         assert!((r - 1.0).abs() < 0.1, "{r}");
     }
 
-    // The same sphere is invisible from the default region at the origin
+    // The same sphere is invisible from the default region at the origin,
+    // which is an error rather than an empty file
+    let r = post(
+        &app(),
+        "/v1/export/stl",
+        json!({ "script": script, "depth": 4 }),
+    )
+    .await;
+    assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "empty_mesh");
+    let m = error_message(&r);
+    assert!(
+        m.starts_with("meshing the region center (0, 0, 0) +/- 1 at depth 4 produced no triangles"),
+        "{m}"
+    );
+}
+
+#[tokio::test]
+async fn stl_clipped_by_region_warns() {
+    // Radius 1 pokes out of the default region (half_size 1) only along x
+    let script = "draw(max(sqrt(x*x + y*y + z*z) - 1.2, max(abs(y), abs(z)) - 0.5))";
     let (s, h, b) = post(
         &app(),
         "/v1/export/stl",
         json!({ "script": script, "depth": 4 }),
     )
     .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let warnings: Vec<_> = h.get_all("x-warning").iter().collect();
+    assert_eq!(warnings.len(), 1);
+    let w = warnings[0].to_str().unwrap();
+    assert!(
+        w.contains("center (0, 0, 0) +/- 1 on its -x, +x side(s)"),
+        "{w}"
+    );
+}
+
+#[tokio::test]
+async fn stl_nan_is_reported() {
+    // 0/0 on the plane x = 0.25, which the depth-4 grid samples exactly
+    let script = "(sqrt(x*x + y*y + z*z) - 0.5) * ((x - 0.25) / (x - 0.25))";
+    let r = post(
+        &app(),
+        "/v1/export/stl",
+        json!({ "script": script, "depth": 4 }),
+    )
+    .await;
+    assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "non_finite_field");
+    let m = error_message(&r);
+    assert!(
+        m.starts_with("meshing failed: the field is NaN at (0.25, "),
+        "{m}"
+    );
+
+    // Renders succeed and report the NaN as a warning
+    let (s, h, _) = post(
+        &app(),
+        "/v1/raster/2d",
+        json!({ "script": script, "width": 16, "height": 16 }),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(h["x-triangle-count"], "0");
-    assert_eq!(b.len(), 84);
+    let w = h["x-warning"].to_str().unwrap();
+    assert!(w.ends_with("), inside this view"), "{w}");
 }
 
 #[tokio::test]
@@ -702,6 +764,8 @@ async fn job_timeout_cancels_render() {
     )
     .await;
     assert_error(&r, StatusCode::GATEWAY_TIMEOUT, "timeout");
+    let m = error_message(&r);
+    assert!(m == "rendering exceeded the 0.05 s job budget", "{m}");
 }
 
 #[tokio::test]
@@ -714,6 +778,8 @@ async fn job_timeout_cancels_mesh() {
     )
     .await;
     assert_error(&r, StatusCode::GATEWAY_TIMEOUT, "timeout");
+    let m = error_message(&r);
+    assert!(m == "meshing exceeded the 0.05 s job budget", "{m}");
 }
 
 #[tokio::test]
@@ -726,6 +792,11 @@ async fn job_timeout_cancels_script() {
     ]);
     let r = post(&app, "/v1/scripts/validate", json!({ "script": "loop {}" })).await;
     assert_error(&r, StatusCode::GATEWAY_TIMEOUT, "timeout");
+    let m = error_message(&r);
+    assert!(
+        m == "running the script exceeded the 0.05 s job budget",
+        "{m}"
+    );
 }
 
 #[tokio::test]

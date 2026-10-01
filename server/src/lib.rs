@@ -16,7 +16,7 @@ use std::sync::{
 use axum::{
     Router,
     extract::{DefaultBodyLimit, Request, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderValue, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -28,7 +28,6 @@ use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     sensitive_headers::SetSensitiveRequestHeadersLayer,
     set_header::SetResponseHeaderLayer,
-    timeout::TimeoutLayer,
     trace::{DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
@@ -121,6 +120,20 @@ async fn not_found() -> ApiError {
     ApiError::NotFound
 }
 
+/// Backstop for handlers that overrun the job budget; answers with the usual
+/// JSON error body, unlike `tower_http`'s timeout layer
+async fn request_timeout(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let limit = state.config.request_timeout();
+    match tokio::time::timeout(limit, next.run(req)).await {
+        Ok(res) => res,
+        Err(_) => ApiError::Timeout(format!(
+            "the request exceeded the server's {} s limit",
+            limit.as_secs_f64()
+        ))
+        .into_response(),
+    }
+}
+
 fn panic_response(_: Box<dyn std::any::Any + Send + 'static>) -> Response {
     ApiError::Internal("handler panicked".into()).into_response()
 }
@@ -159,9 +172,9 @@ pub fn router(state: AppState) -> Router {
         )
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(CatchPanicLayer::custom(panic_response))
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::GATEWAY_TIMEOUT,
-            state.config.request_timeout(),
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_timeout,
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,
@@ -185,6 +198,7 @@ pub fn router(state: AppState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
 
     #[test]
     fn panic_response_is_generic_500() {

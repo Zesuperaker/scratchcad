@@ -38,7 +38,7 @@ async def test_lists_exactly_the_five_tools(client: Client[Any]) -> None:
 
 async def test_instructions_carry_the_scripting_guide(client: Client[Any]) -> None:
     assert client.instructions == GUIDE
-    for needle in ("draw(shape)", "difference(", "degrees", "half_size", "negative"):
+    for needle in ("draw(shape)", "difference(", "degrees", "half_size", "negative", "finite"):
         assert needle in GUIDE
 
 
@@ -179,6 +179,23 @@ async def test_render_2d_passes_every_option(client: Client[Any], fake: FakeScra
     }
 
 
+@pytest.mark.parametrize("tool", ["render_2d", "render_3d"])
+async def test_render_warnings_follow_the_image(
+    client: Client[Any], fake: FakeScratchcad, tool: str
+) -> None:
+    fake.handler = lambda request: httpx2.Response(
+        200,
+        content=PNG,
+        headers={"content-type": "image/png", "x-warning": "the field is NaN at (0, 0, 0)"},
+    )
+    result = await client.call_tool(tool, {"script": SCRIPT})
+    image, warning = result.content
+    assert isinstance(image, ImageContent)
+    assert base64.b64decode(image.data) == PNG
+    assert isinstance(warning, TextContent)
+    assert warning.text == "Warning: the field is NaN at (0, 0, 0)"
+
+
 # --- render_3d --------------------------------------------------------------
 
 
@@ -286,6 +303,7 @@ async def test_export_stl_writes_the_file(
         "bytes": len(b"solid-bytes"),
         "triangles": 1234,
         "compute_ms": 40.25,
+        "warnings": [],
     }
     assert target.read_bytes() == b"solid-bytes"
     assert fake.last.url.path == "/v1/export/stl"
@@ -295,6 +313,25 @@ async def test_export_stl_writes_the_file(
         "half_size": 1.0,
         "depth": 6,
     }
+
+
+async def test_export_stl_reports_warnings(
+    client: Client[Any], fake: FakeScratchcad, settings: Settings
+) -> None:
+    fake.handler = lambda request: httpx2.Response(
+        200,
+        content=b"solid-bytes",
+        headers={
+            "x-triangle-count": "8",
+            "x-warning": "the shape reaches the boundary on its -x, +x side(s)",
+        },
+    )
+    result = await client.call_tool("export_stl", {"script": SCRIPT, "path": "part.stl"})
+    assert result.structured_content is not None
+    assert result.structured_content["warnings"] == [
+        "the shape reaches the boundary on its -x, +x side(s)"
+    ]
+    assert (settings.output_dir / "part.stl").read_bytes() == b"solid-bytes"
 
 
 async def test_export_stl_passes_every_option(client: Client[Any], fake: FakeScratchcad) -> None:
