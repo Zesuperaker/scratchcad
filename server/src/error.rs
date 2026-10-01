@@ -38,8 +38,23 @@ pub enum ApiError {
     #[error("server is at capacity, retry later")]
     Overloaded,
 
-    #[error("job exceeded its time budget")]
-    Timeout,
+    /// The field is NaN or infinite at a point the mesher sampled
+    #[error("{0}")]
+    NonFiniteField(String),
+
+    /// Meshing produced no triangles
+    #[error("{0}")]
+    EmptyMesh(String),
+
+    /// The mesher panicked for a reason the server could not identify.  Unlike
+    /// [`Internal`](Self::Internal), the message is passed on: it is the
+    /// mesher's own assertion text plus what the server checked.
+    #[error("{0}")]
+    MeshFailed(String),
+
+    /// The message says which stage was running and the budget it exceeded
+    #[error("{0}")]
+    Timeout(String),
 
     #[error("internal error")]
     Internal(String),
@@ -57,6 +72,13 @@ struct Inner<'a> {
 }
 
 impl ApiError {
+    /// Work stopped because its [`CancelToken`](fidget::render::CancelToken)
+    /// was tripped.  When that was the job budget, [`Jobs`](crate::jobs::Jobs)
+    /// replaces this with a message naming the stage that ran out of time.
+    pub fn cancelled() -> Self {
+        Self::Timeout("the job was cancelled before it finished".into())
+    }
+
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
             Self::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
@@ -68,7 +90,10 @@ impl ApiError {
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Overloaded => (StatusCode::SERVICE_UNAVAILABLE, "overloaded"),
-            Self::Timeout => (StatusCode::GATEWAY_TIMEOUT, "timeout"),
+            Self::NonFiniteField(_) => (StatusCode::UNPROCESSABLE_ENTITY, "non_finite_field"),
+            Self::EmptyMesh(_) => (StatusCode::UNPROCESSABLE_ENTITY, "empty_mesh"),
+            Self::MeshFailed(_) => (StatusCode::INTERNAL_SERVER_ERROR, "mesh_failed"),
+            Self::Timeout(_) => (StatusCode::GATEWAY_TIMEOUT, "timeout"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }
@@ -77,9 +102,11 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = self.status_and_code();
-        if let Self::Internal(detail) = &self {
+        match &self {
             // Details stay in the logs; clients only see a generic message.
-            tracing::error!(%detail, "internal error");
+            Self::Internal(detail) => tracing::error!(%detail, "internal error"),
+            Self::MeshFailed(detail) => tracing::error!(%detail, "mesher failed"),
+            _ => {}
         }
         let body = Body {
             error: Inner {
@@ -152,7 +179,14 @@ mod tests {
             (ApiError::NotFound, 404, "not_found"),
             (ApiError::Unauthorized, 401, "unauthorized"),
             (ApiError::Overloaded, 503, "overloaded"),
-            (ApiError::Timeout, 504, "timeout"),
+            (
+                ApiError::NonFiniteField("m".into()),
+                422,
+                "non_finite_field",
+            ),
+            (ApiError::EmptyMesh("m".into()), 422, "empty_mesh"),
+            (ApiError::MeshFailed("m".into()), 500, "mesh_failed"),
+            (ApiError::Timeout("m".into()), 504, "timeout"),
             (ApiError::Internal("m".into()), 500, "internal"),
         ];
         for (err, status, code) in cases {
@@ -171,6 +205,10 @@ mod tests {
     async fn messages_are_passed_through_except_internal_details() {
         let (_, _, v) = render(ApiError::Script("line 3: oops".into())).await;
         assert_eq!(v["error"]["message"], "script error: line 3: oops");
+        let (_, _, v) = render(ApiError::Timeout("meshing ran out".into())).await;
+        assert_eq!(v["error"]["message"], "meshing ran out");
+        let (_, _, v) = render(ApiError::MeshFailed("assertion failed: x".into())).await;
+        assert_eq!(v["error"]["message"], "assertion failed: x");
         let (_, _, v) = render(ApiError::Internal("secret path /etc".into())).await;
         assert_eq!(v["error"]["message"], "internal error");
     }

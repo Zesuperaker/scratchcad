@@ -129,13 +129,19 @@ pub fn compile(
         .map_err(|e| ApiError::Script(e.to_string()))?;
     let result = engine
         .eval_ast::<Dynamic>(&ast)
-        .map_err(|e| map_eval_error(*e, cancel))?;
+        .map_err(|e| map_eval_error(*e, limits, cancel))?;
 
     let tree = match drawn.lock().unwrap_or_else(|e| e.into_inner()).take() {
         Some(t) => t,
-        None => result.try_cast::<Tree>().ok_or_else(|| {
-            ApiError::Script("script must call draw(shape) or evaluate to a shape".into())
-        })?,
+        None => {
+            let got = result.type_name();
+            result.try_cast::<Tree>().ok_or_else(|| {
+                ApiError::Script(format!(
+                    "script must call draw(shape) or evaluate to a shape, \
+                     but it evaluated to a value of type `{got}`"
+                ))
+            })?
+        }
     };
     // Release the engine (and its closures) before the potentially large
     // import, so that the only remaining reference to the tree is ours.
@@ -167,8 +173,10 @@ pub fn compile(
 /// Rejects shapes that depend on free variables other than `x`, `y`, `z`,
 /// which the rendering endpoints have no way to bind.
 fn check_vars(ctx: &Context, root: Node) -> Result<(), ApiError> {
+    // Only the graph the script produced can make this fail, so the error
+    // belongs to the caller rather than the server.
     let shape = fidget::vm::VmShape::new(ctx, root)
-        .map_err(|e| ApiError::Internal(format!("building shape: {e}")))?;
+        .map_err(|e| ApiError::Unprocessable(format!("could not build the shape: {e}")))?;
     let free = shape
         .inner()
         .vars()
@@ -177,17 +185,26 @@ fn check_vars(ctx: &Context, root: Node) -> Result<(), ApiError> {
         .count();
     if free > 0 {
         return Err(ApiError::Unprocessable(format!(
-            "shape uses {free} free variable(s) other than x, y, z"
+            "shape uses {free} free variable(s) other than x, y and z; \
+             only x, y and z can be bound when it is evaluated"
         )));
     }
     Ok(())
 }
 
-fn map_eval_error(e: EvalAltResult, cancel: &CancelToken) -> ApiError {
+fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits, cancel: &CancelToken) -> ApiError {
     match e {
-        EvalAltResult::ErrorTerminated(..) if cancel.is_cancelled() => ApiError::Timeout,
-        EvalAltResult::ErrorTooManyOperations(..) => {
-            ApiError::LimitExceeded("script exceeded its operation budget".into())
+        EvalAltResult::ErrorTerminated(..) if cancel.is_cancelled() => ApiError::cancelled(),
+        EvalAltResult::ErrorTooManyOperations(pos) => {
+            let at = if pos.is_none() {
+                String::new()
+            } else {
+                format!(" at {pos}")
+            };
+            ApiError::LimitExceeded(format!(
+                "script exceeded its budget of {} operations{at}",
+                limits.max_operations
+            ))
         }
         EvalAltResult::ErrorDataTooLarge(what, pos) => {
             ApiError::LimitExceeded(format!("script exceeded a size limit: {what} ({pos})"))
@@ -234,6 +251,31 @@ mod tests {
     }
 
     #[test]
+    fn non_shape_result_names_what_the_script_produced() {
+        let c = CancelToken::new();
+        let msg = |src| match compile(src, &limits(), &c) {
+            Err(ApiError::Script(m)) => m,
+            _ => panic!("expected a script error for {src}"),
+        };
+        assert!(msg("1 + 2").ends_with("evaluated to a value of type `i64`"));
+        assert!(msg("let s = x;").ends_with("evaluated to a value of type `()`"));
+    }
+
+    #[test]
+    fn operation_budget_error_gives_limit_and_position() {
+        let c = CancelToken::new();
+        let l = ScriptLimits {
+            max_operations: 100,
+            ..limits()
+        };
+        let Err(ApiError::LimitExceeded(m)) = compile("let t = 0;\nloop { t += 1; }", &l, &c)
+        else {
+            panic!("expected a limit error")
+        };
+        assert!(m.contains("budget of 100 operations at line 2"), "{m}");
+    }
+
+    #[test]
     fn sandbox_limits() {
         let c = CancelToken::new();
         assert!(matches!(
@@ -263,7 +305,10 @@ mod tests {
             max_operations: 0, // unlimited
             ..limits()
         };
-        assert!(matches!(compile("loop {}", &l, &c), Err(ApiError::Timeout)));
+        assert!(matches!(
+            compile("loop {}", &l, &c),
+            Err(ApiError::Timeout(_))
+        ));
     }
 
     #[test]

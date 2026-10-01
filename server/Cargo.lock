@@ -435,22 +435,22 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 
 [[package]]
 name = "enum-map"
-version = "2.7.3"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
+checksum = "d4532960034c15ba2f55e9eee631040ecc473c32e6c4b200828c759840f13a06"
 dependencies = [
  "enum-map-derive",
 ]
 
 [[package]]
 name = "enum-map-derive"
-version = "0.17.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
+checksum = "7127272f64b3e098f7d81f350d672081b879bff896d219c42370dc858b1af9ff"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -571,9 +571,9 @@ dependencies = [
 
 [[package]]
 name = "fidget"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6214a9d3f6f2fd6cb5f119cfd3d496d9c562f0fda41c286265a6d1ca0db3d050"
+checksum = "69298d7641ec13971a5359ab20961a92482eab6201c7a89a1372a4ceac1f6987"
 dependencies = [
  "document-features",
  "fidget-core",
@@ -587,9 +587,9 @@ dependencies = [
 
 [[package]]
 name = "fidget-core"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ed4b64729148d4d56f5216bcf48c1fb8e8c24876faeb9b8efe415f573aba93c"
+checksum = "b72374bb0a76f138aacd08b0611de2154cbb5eea0cf8251b11ed7bf3447e9a58"
 dependencies = [
  "facet",
  "getrandom 0.2.17",
@@ -607,9 +607,9 @@ dependencies = [
 
 [[package]]
 name = "fidget-jit"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0533d5aa80773945f73d1d9e7e0fd0ceb55a0eb5c2d3ede0b6d46d910d084e4d"
+checksum = "a26c5c6c91f9b913b265c4c9888ff73ee7dfa93e169b295799e63cbe128b1fed"
 dependencies = [
  "arrayvec",
  "dynasmrt",
@@ -622,9 +622,9 @@ dependencies = [
 
 [[package]]
 name = "fidget-mesh"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9d1c394abca268c1821951668d64087942e4e6b6cd39dc194ba1aa61a4581b2"
+checksum = "d69e5b061d296f0eadec87045a64c208da2209e1f43565684db2c2761bcb1017"
 dependencies = [
  "arrayvec",
  "fidget-core",
@@ -637,9 +637,9 @@ dependencies = [
 
 [[package]]
 name = "fidget-raster"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "999c3bccf9e531bd673d11258c79c86251d99787546e54bf1596f507b3bc52ae"
+checksum = "e7e8908e9339218b9973217ab3dbcdd9c441579ae7ebbd6ddfe39a8f4a7a1f3e"
 dependencies = [
  "fidget-core",
  "nalgebra",
@@ -653,9 +653,9 @@ dependencies = [
 
 [[package]]
 name = "fidget-rhai"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95608f75be164d3253b6ad3171b56f3ad887a396e45e7423135d619568b012e9"
+checksum = "1d14cff5da2bbd66da8d4125885a16b1d84f3637cdf04115d7809b3e83813608"
 dependencies = [
  "enum-map",
  "facet",
@@ -669,9 +669,9 @@ dependencies = [
 
 [[package]]
 name = "fidget-shapes"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60b5d9f888b1d87538f96ffaa3390ee5ace153286316b6dc38dfaee54590f8f9"
+checksum = "3d1951ccdff08fbc701421091a00b8799d0cbf10b87cc87a8d16075d3ad2f564"
 dependencies = [
  "enum-map",
  "facet",
@@ -1022,29 +1022,6 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
-
-[[package]]
-name = "scratchcad"
-version = "0.1.0"
-dependencies = [
- "axum",
- "clap",
- "fidget",
- "http-body-util",
- "image",
- "nalgebra",
- "rayon",
- "rhai",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "matchers"
@@ -1472,6 +1449,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "scratchcad"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "fidget",
+ "http-body-util",
+ "image",
+ "nalgebra",
+ "rayon",
+ "rhai",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

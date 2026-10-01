@@ -68,6 +68,23 @@ async def test_binary_responses_carry_header_metadata(api: ScratchcadClient) -> 
     assert stl.data == b"solid-bytes"
     assert stl.compute_ms == 40.25
     assert stl.triangles == 1234
+    assert stl.warnings == ()
+
+
+async def test_every_warning_header_is_kept_whole(
+    api: ScratchcadClient, fake: FakeScratchcad
+) -> None:
+    # Warnings contain commas, so repeated headers must not be split on them
+    fake.handler = lambda request: httpx2.Response(
+        200,
+        content=b"stl",
+        headers=[
+            ("x-warning", "the shape reaches the boundary on its -x, +x side(s)"),
+            ("x-warning", "second"),
+        ],
+    )
+    stl = await api.export_stl({"script": "x"})
+    assert stl.warnings == ("the shape reaches the boundary on its -x, +x side(s)", "second")
 
 
 async def test_missing_or_garbled_headers_become_none(
@@ -89,6 +106,10 @@ async def test_missing_or_garbled_headers_become_none(
         (503, "overloaded", "retry in a moment"),
         (422, "limit_exceeded", "reduce the size"),
         (504, "timeout", None),
+        (500, "internal", None),
+        (500, "mesh_failed", None),
+        (422, "non_finite_field", None),
+        (422, "empty_mesh", None),
     ],
 )
 async def test_api_errors_keep_code_and_message(
@@ -128,6 +149,37 @@ async def test_non_scratchcad_errors_report_status_and_body(
         await api.eval({"script": "x"})
     assert caught.value.code is None
     assert caught.value.status == response.status_code
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx2.Response(500, json={"error": {"code": "internal", "message": "internal error"}}),
+        httpx2.Response(502, text="Bad Gateway"),
+    ],
+)
+async def test_server_failures_name_the_request_id(
+    api: ScratchcadClient, fake: FakeScratchcad, response: httpx2.Response
+) -> None:
+    response.headers["x-request-id"] = "abc-123"
+    fake.handler = lambda request: response
+    with pytest.raises(ScratchcadError) as caught:
+        await api.eval({"script": "x"})
+    assert str(caught.value).endswith("logged the details under request id abc-123)")
+
+
+async def test_client_errors_do_not_mention_the_request_id(
+    api: ScratchcadClient, fake: FakeScratchcad
+) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        response = scratchcad_error(422, "script_error", "oops")(request)
+        response.headers["x-request-id"] = "abc-123"
+        return response
+
+    fake.handler = handler
+    with pytest.raises(ScratchcadError) as caught:
+        await api.eval({"script": "x"})
+    assert str(caught.value) == "script_error: oops"
 
 
 async def test_long_error_bodies_are_truncated(api: ScratchcadClient, fake: FakeScratchcad) -> None:

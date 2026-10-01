@@ -1,7 +1,7 @@
 # scratchcad
 
 A lean HTTP service built on [Fidget](https://github.com/mkeeter/fidget)
-**v0.5.0** and [axum](https://github.com/tokio-rs/axum). You send it
+**v0.5.1** and [axum](https://github.com/tokio-rs/axum). You send it
 [Rhai](https://rhai.rs) scripts that describe implicit surfaces, and it can:
 
 - **validate scripts**: `POST /v1/scripts/validate`
@@ -24,7 +24,7 @@ docker build -t scratchcad . && docker run -p 8080:8080 -e SCRATCHCAD_API_TOKEN=
 Scripts use Fidget's Rhai bindings (`x`, `y`, `z`, arithmetic, `min`/`max`,
 `sqrt`, `sin`, `remap`, shape constructors such as `sphere(#{ radius: 1.0 })`,
 `circle`, `union`, `difference` and so on; see the
-[`fidget::rhai` docs](https://docs.rs/fidget/0.5.0/fidget/rhai/index.html)).
+[`fidget::rhai` docs](https://docs.rs/fidget/0.5.1/fidget/rhai/index.html)).
 A script produces its shape in one of two ways:
 
 - it calls `draw(shape)` exactly once, or
@@ -136,7 +136,20 @@ curl -s localhost:8080/v1/raster/3d -H 'content-type: application/json' -o shape
 Vertices are in model coordinates. The response includes
 `Content-Disposition: attachment` and an `x-triangle-count` header.
 
-PNG and STL responses also carry an `x-compute-ms` header.
+Error responses report what the server observed and leave the remedy to the
+client:
+
+| code | status | message contents |
+|---|---|---|
+| `non_finite_field` | `422` | a point on the octree grid where the field is NaN or infinite, and the mesher's panic message |
+| `empty_mesh` | `422` | the region, the depth, and how many samples on the region's boundary are inside the shape |
+| `mesh_failed` | `500` | the mesher's panic message, when the field is finite at every grid corner |
+
+PNG and STL responses also carry an `x-compute-ms` header, and one `x-warning`
+header per observation that didn't stop the request: for a render, a point in
+the view where the field is NaN or infinite (renders skip such samples); for an
+STL, the sides of the region the shape reaches and how many boundary samples
+are inside it.
 
 ### Health
 
@@ -151,7 +164,8 @@ Neither probe requires authentication.
 - **Bounded compute.** At most `SCRATCHCAD_MAX_CONCURRENT_JOBS` jobs run at once, on blocking threads with a dedicated Rayon pool for Fidget. Other requests queue for up to `SCRATCHCAD_QUEUE_TIMEOUT_MS` and then get a `503`.
 - **Real cancellation.** Every job gets a Fidget `CancelToken`. The token trips on timeout **and** when the client disconnects. Fidget's renderers, the mesher and the Rhai sandbox all check it, so abandoned work stops instead of burning CPU. A job keeps its slot until it has actually stopped, so timed-out work never oversubscribes the machine.
 - **Bounded inputs and outputs.** Limits cover body size, script size, point count, image dimensions, mesh depth and triangle count. Every float input is checked to be finite.
-- **Fault isolation.** A panic in a job or handler becomes a `500` with a generic message, and the details go to the logs.
+- **Fault isolation.** A panic in a job or handler becomes a `500` with a generic message, and the details go to the logs under the request ID (the `x-request-id` response header).
+- **Timeouts say what ran out.** A `504` names the stage that was running (the script, evaluation, rendering or meshing) and the budget it exceeded.
 - **Graceful shutdown.** On `SIGTERM` or `SIGINT`, readiness flips to `503`, queued jobs are rejected, in-flight requests finish, and blocking work gets 5 s to wind down.
 - **Observability.** Structured logs (`SCRATCHCAD_LOG_FORMAT=json`, filtered with `RUST_LOG`) carry a per-request span with the request ID, and the log level is set by response status.
 - **Authentication.** An optional bearer token (`SCRATCHCAD_API_TOKEN`, at least 16 chars) is compared in constant time, and the `Authorization` header is redacted from logs.

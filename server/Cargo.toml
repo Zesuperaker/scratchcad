@@ -8,7 +8,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-fidget = { version = "=0.5.0", default-features = false, features = ["jit", "mesh", "raster", "rhai", "shapes"] }
+fidget = { version = "=0.5.1", default-features = false, features = ["jit", "mesh", "raster", "rhai", "shapes"] }
 rhai = { version = "1.26.1", features = ["sync"] }
 nalgebra = "0.35.0"
 rayon = "1.12.0"

@@ -18,13 +18,16 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AppState,
     error::{ApiError, ApiJson},
-    jobs::JobCtx,
+    jobs::{JobCtx, Stage},
     ops::{self, Evaluator, Mode2d, Mode3d},
     script::{self, Compiled},
 };
 
 const X_COMPUTE_MS: HeaderName = HeaderName::from_static("x-compute-ms");
 const X_TRIANGLES: HeaderName = HeaderName::from_static("x-triangle-count");
+/// One per warning: the request succeeded, but the result may not be what
+/// the caller intended (for example a mesh cut open at the region boundary)
+const X_WARNING: HeaderName = HeaderName::from_static("x-warning");
 
 ////////////////////////////////////////////////////////////////////////////////
 // Validation helpers
@@ -79,6 +82,25 @@ fn ms_since(start: Instant) -> f64 {
 
 fn ms_header(ms: f64) -> HeaderValue {
     HeaderValue::from_str(&format!("{ms:.3}")).expect("number is a valid header")
+}
+
+fn add_warnings(headers: &mut HeaderMap, warnings: &[String]) {
+    for w in warnings {
+        // Header values must be visible ASCII; warnings are written that way,
+        // but never drop one over a stray character.
+        let ascii: String = w
+            .chars()
+            .map(|c| {
+                if c == ' ' || c.is_ascii_graphic() {
+                    c
+                } else {
+                    '?'
+                }
+            })
+            .collect();
+        let value = HeaderValue::from_str(&ascii).expect("sanitized to visible ASCII");
+        headers.append(X_WARNING, value);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -252,6 +274,7 @@ pub async fn eval(
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
+            ctx.set_stage(Stage::Evaluating);
             let start = Instant::now();
             let mut out = EvalResponse::default();
             match req.mode {
@@ -328,12 +351,13 @@ pub async fn raster_2d(
     let world_to_model = transform_2d(req.center, req.half_size);
 
     let st = state.clone();
-    let (png, ms) = state
+    let (png, warnings, ms) = state
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
+            ctx.set_stage(Stage::Rendering);
             let start = Instant::now();
-            let rgba = ops::dispatch(
+            let out = ops::dispatch(
                 req.evaluator,
                 &c,
                 ops::Raster2d {
@@ -344,11 +368,11 @@ pub async fn raster_2d(
                     cancel: ctx.cancel.clone(),
                 },
             )?;
-            let png = ops::encode_png(&rgba, w, h)?;
-            Ok((png, ms_since(start)))
+            let png = ops::encode_png(&out.rgba, w, h)?;
+            Ok((png, out.warnings, ms_since(start)))
         })
         .await?;
-    Ok(png_response(png, ms))
+    Ok(png_response(png, &warnings, ms))
 }
 
 #[derive(Deserialize, Default)]
@@ -423,12 +447,13 @@ pub async fn raster_3d(
     let world_to_model = camera_3d(req.center, req.half_size, r, req.perspective);
 
     let st = state.clone();
-    let (png, ms) = state
+    let (png, warnings, ms) = state
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
+            ctx.set_stage(Stage::Rendering);
             let start = Instant::now();
-            let rgba = ops::dispatch(
+            let out = ops::dispatch(
                 req.evaluator,
                 &c,
                 ops::Raster3d {
@@ -441,17 +466,18 @@ pub async fn raster_3d(
                     cancel: ctx.cancel.clone(),
                 },
             )?;
-            let png = ops::encode_png(&rgba, w, h)?;
-            Ok((png, ms_since(start)))
+            let png = ops::encode_png(&out.rgba, w, h)?;
+            Ok((png, out.warnings, ms_since(start)))
         })
         .await?;
-    Ok(png_response(png, ms))
+    Ok(png_response(png, &warnings, ms))
 }
 
-fn png_response(png: Vec<u8>, ms: f64) -> Response {
+fn png_response(png: Vec<u8>, warnings: &[String], ms: f64) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
     headers.insert(X_COMPUTE_MS, ms_header(ms));
+    add_warnings(&mut headers, warnings);
     (headers, png).into_response()
 }
 
@@ -501,6 +527,7 @@ pub async fn export_stl(
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
+            ctx.set_stage(Stage::Meshing);
             let start = Instant::now();
             let stl = ops::dispatch(
                 req.evaluator,
@@ -511,6 +538,7 @@ pub async fn export_stl(
                     max_triangles,
                     pool: &ctx.pool,
                     cancel: ctx.cancel.clone(),
+                    set_stage: &|s| ctx.set_stage(s),
                 },
             )?;
             Ok((stl, ms_since(start)))
@@ -525,6 +553,7 @@ pub async fn export_stl(
     );
     headers.insert(X_COMPUTE_MS, ms_header(ms));
     headers.insert(X_TRIANGLES, HeaderValue::from(stl.triangles));
+    add_warnings(&mut headers, &stl.warnings);
     tracing::debug!(
         triangles = stl.triangles,
         vertices = stl.vertices,
