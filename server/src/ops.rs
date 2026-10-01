@@ -10,7 +10,7 @@ use fidget::{
     shape::{BoundShape, Shape, ShapeBulkEval},
     types::{Grad, Interval},
 };
-use nalgebra::{Matrix3, Matrix4, Point3};
+use nalgebra::{Matrix3, Matrix4, Point2, Point3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -117,6 +117,37 @@ fn embed_2d(m: &Matrix3<f32>) -> Matrix4<f32> {
     out
 }
 
+/// Maps the `[-1, 1]` probe cube onto the box between two world-space corners
+fn probe_extent(a: Point3<f32>, b: Point3<f32>) -> Matrix4<f32> {
+    let half = (b - a) / 2.0;
+    Matrix4::new_translation(&(a + half).coords) * Matrix4::new_nonuniform_scaling(&half)
+}
+
+/// Maps the `[-1, 1]` probe square onto the world-space view a 2D render of
+/// `size` covers.  Fidget scales the shorter axis to `[-1, 1]`, so the longer
+/// one reaches past it.  z is left at 0.
+fn view_2d(size: ImageSize) -> Matrix4<f32> {
+    let (w, h) = (size.width() as i32, size.height() as i32);
+    let a = size.transform_point(Point2::new(0, 0));
+    let b = size.transform_point(Point2::new(w, h));
+    let mut m = probe_extent(Point3::new(a.x, a.y, 0.0), Point3::new(b.x, b.y, 0.0));
+    m[(2, 2)] = 1.0;
+    m
+}
+
+/// Maps the `[-1, 1]` probe cube onto the world-space view a 3D render of
+/// `size` covers, as [`view_2d`] does for 2D
+fn view_3d(size: VoxelSize) -> Matrix4<f32> {
+    let (w, h, d) = (
+        size.width() as i32,
+        size.height() as i32,
+        size.depth() as i32,
+    );
+    let a = size.transform_point(Point3::new(0, 0, 0));
+    let b = size.transform_point(Point3::new(w, h, d));
+    probe_extent(a, b)
+}
+
 /// A sample where the field is NaN or infinite
 struct NonFinite {
     /// Model-space position
@@ -206,6 +237,7 @@ fn check_boundary<F>(
     shape: &Shape<F>,
     world_to_model: &Matrix4<f32>,
     n: usize,
+    cancel: &CancelToken,
 ) -> Result<Boundary, ApiError>
 where
     F: Function + MathFunction + RenderHints + Clone,
@@ -238,6 +270,9 @@ where
         }
         let mut inside = 0;
         for c in 0..coords[0].len().div_ceil(EVAL_CHUNK) {
+            if cancel.is_cancelled() {
+                return Err(ApiError::cancelled());
+            }
             let r = c * EVAL_CHUNK..((c + 1) * EVAL_CHUNK).min(coords[0].len());
             let vals = eval
                 .eval_with_transform(
@@ -419,7 +454,7 @@ impl ShapeJob for Raster2d<'_> {
         };
         let warnings = render_nan_warning(
             &shape,
-            &embed_2d(&self.world_to_model),
+            &(embed_2d(&self.world_to_model) * view_2d(self.size)),
             RENDER_PROBE_2D,
             1,
             self.pool,
@@ -531,7 +566,7 @@ impl ShapeJob for Raster3d<'_> {
         };
         let warnings = render_nan_warning(
             &shape,
-            &self.world_to_model,
+            &(self.world_to_model * view_3d(self.size)),
             RENDER_PROBE_3D,
             RENDER_PROBE_3D,
             self.pool,
@@ -603,7 +638,7 @@ impl ShapeJob for MeshJob<'_> {
 
         (self.set_stage)(Stage::Checking);
         let face_samples = ((1usize << self.depth) + 1).min(MAX_FACE_PROBE);
-        let boundary = check_boundary(&shape, &self.world_to_model, face_samples)?;
+        let boundary = check_boundary(&shape, &self.world_to_model, face_samples, &self.cancel)?;
         let region = region(&self.world_to_model);
         if triangles == 0 {
             return Err(ApiError::EmptyMesh(format!(
@@ -945,6 +980,86 @@ mod tests {
             "{:?}",
             out.warnings
         );
+    }
+
+    #[test]
+    fn non_square_renders_probe_their_whole_view() {
+        // NaN only past x = 1.5, which a wide view reaches and a square one doesn't
+        let edge_nan = "sqrt(1.5 - x) + y*y + z*z - 0.5";
+        let pool = ThreadPool::Global;
+        let r2 = |w, h| {
+            dispatch(
+                Evaluator::Jit,
+                &shape(edge_nan),
+                Raster2d {
+                    size: ImageSize::new(w, h),
+                    mode: Mode2d::Mono,
+                    world_to_model: Matrix3::identity(),
+                    pool: &pool,
+                    cancel: CancelToken::new(),
+                },
+            )
+            .unwrap()
+            .warnings
+        };
+        assert!(r2(32, 32).is_empty());
+        let w = r2(64, 32);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].starts_with("the field is NaN at ("), "{w:?}");
+
+        let r3 = |w, h, d| {
+            dispatch(
+                Evaluator::Jit,
+                &shape(edge_nan),
+                Raster3d {
+                    size: VoxelSize::new(w, h, d),
+                    mode: Mode3d::Heightmap,
+                    denoise: false,
+                    ssao: false,
+                    world_to_model: Matrix4::identity(),
+                    pool: &pool,
+                    cancel: CancelToken::new(),
+                },
+            )
+            .unwrap()
+            .warnings
+        };
+        assert!(r3(16, 16, 16).is_empty());
+        assert_eq!(r3(32, 16, 16).len(), 1);
+    }
+
+    #[test]
+    fn probe_views_match_the_renderers() {
+        // 2:1 images reach x = +/-2; the short axis stays near [-1, 1]
+        let m = view_2d(ImageSize::new(64, 32));
+        let a = m.transform_point(&Point3::new(-1.0, -1.0, 0.0));
+        let b = m.transform_point(&Point3::new(1.0, 1.0, 0.0));
+        assert_eq!((a.x, b.x), (-2.0, 2.0));
+        assert!((a.y - b.y).abs() - 2.0 < 0.1, "{a} {b}");
+        assert_eq!((a.z, b.z), (0.0, 0.0));
+        let m = view_3d(VoxelSize::new(16, 16, 48));
+        let a = m.transform_point(&Point3::new(-1.0, -1.0, -1.0));
+        let b = m.transform_point(&Point3::new(1.0, 1.0, 1.0));
+        assert_eq!((a.x, b.x), (-1.0, 1.0));
+        assert_eq!((a.z, b.z), (-3.0, 3.0));
+    }
+
+    #[test]
+    fn boundary_check_stops_when_cancelled() {
+        struct Probe(CancelToken);
+        impl ShapeJob for Probe {
+            type Output = ();
+            fn run<F>(self, shape: Shape<F>) -> Result<(), ApiError>
+            where
+                F: Function + MathFunction + RenderHints + Clone,
+            {
+                check_boundary(&shape, &Matrix4::identity(), 17, &self.0).map(|_| ())
+            }
+        }
+        let c = shape(SPHERE);
+        assert!(dispatch(Evaluator::Jit, &c, Probe(CancelToken::new())).is_ok());
+        let r = dispatch(Evaluator::Jit, &c, Probe(cancelled()));
+        assert!(matches!(r, Err(ApiError::Timeout(_))));
     }
 
     #[test]
