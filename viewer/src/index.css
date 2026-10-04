@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* Colours that CodeMirror and three.js-adjacent UI read as variables, so
+   they follow the light/dark theme like the Tailwind classes do. */
+:root {
+  color-scheme: light dark;
+  --editor-bg: #ffffff;
+  --editor-border: #e4e4e7;
+  --editor-muted: #a1a1aa;
+  --editor-active-line: #f4f4f5;
+  --editor-selection: #bfdbfe;
+  --code-keyword: #7c3aed;
+  --code-comment: #71717a;
+  --code-string: #15803d;
+  --code-number: #c2410c;
+  --code-atom: #0369a1;
+  --code-function: #2563eb;
+  --code-operator: #52525b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --editor-bg: #18181b;
+    --editor-border: #3f3f46;
+    --editor-muted: #71717a;
+    --editor-active-line: #27272a;
+    --editor-selection: #1e3a8a;
+    --code-keyword: #c4b5fd;
+    --code-comment: #a1a1aa;
+    --code-string: #86efac;
+    --code-number: #fdba74;
+    --code-atom: #7dd3fc;
+    --code-function: #93c5fd;
+    --code-operator: #d4d4d8;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-zinc-100 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+}
