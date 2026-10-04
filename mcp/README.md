@@ -73,7 +73,9 @@ In HTTP mode the server also serves a small browser viewer for the files
 `export_stl` writes, at `GET /viewer` (<http://localhost:8000/viewer> in the
 dev stack). It lists the `.stl` files in `SCRATCHCAD_MCP_OUTPUT_DIR`, newest
 first, polls for new or overwritten exports, and shows the selected one with
-orbit controls, its triangle count and its bounding-box size. The page is a
+orbit controls, its triangle count and its bounding-box size. A view cube in
+the corner turns with the camera; click one of its faces, edges or corners to
+look from that side (Front is +z and Top is +y, as in `render_3d`). The page is a
 single file, [`viewer.html`](src/scratchcad_mcp/viewer.html), with no build
 step: it loads [three.js](https://threejs.org) from jsDelivr.
 

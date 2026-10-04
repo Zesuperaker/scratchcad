@@ -70,10 +70,17 @@
   .empty { padding: 12px 16px; color: var(--muted); }
   main { position: relative; min-width: 0; min-height: 0; }
   canvas { display: block; width: 100%; height: 100%; }
+  #viewcube {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 120px;
+    height: 120px;
+  }
   #toolbar {
     position: absolute;
-    top: 12px;
     right: 12px;
+    bottom: 12px;
     display: flex;
     gap: 8px;
   }
@@ -123,6 +130,7 @@
 </aside>
 <main>
   <canvas id="view"></canvas>
+  <canvas id="viewcube" title="Click a face, edge or corner to look from that side"></canvas>
   <div id="toolbar">
     <button id="wireframe" type="button" aria-pressed="false">Wireframe</button>
     <button id="reset" type="button">Reset view</button>
@@ -184,11 +192,14 @@
 
   renderer.setAnimationLoop(() => {
     resize();
-    controls.update();
+    if (turn) stepTurn(performance.now());
+    else controls.update();
     renderer.render(scene, camera);
+    renderViewCube();
   });
 
   function frame() {
+    turn = null;
     if (!mesh) return;
     const box = mesh.geometry.boundingBox;
     const center = box.getCenter(new THREE.Vector3());
@@ -231,6 +242,146 @@
       `${triangles.toLocaleString()} triangles\n` +
       `size ${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)}`;
     if (refit) frame();
+  }
+
+  // --- view cube -------------------------------------------------------------
+  // A labelled cube that turns with the camera. Clicking a face, edge or
+  // corner swings the camera round the target to look from that side.
+
+  const cubeCanvas = document.getElementById("viewcube");
+  const cubeRenderer = new THREE.WebGLRenderer({ canvas: cubeCanvas, antialias: true, alpha: true });
+  cubeRenderer.setPixelRatio(window.devicePixelRatio);
+  cubeRenderer.setSize(cubeCanvas.clientWidth, cubeCanvas.clientHeight, false);
+  const cubeScene = new THREE.Scene();
+  const cubeCamera = new THREE.OrthographicCamera(-2.2, 2.2, 2.2, -2.2, 0.1, 20);
+  cubeScene.add(cubeCamera);
+  cubeScene.add(new THREE.AmbientLight(0xffffff, 2));
+  const cubeLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  cubeLight.position.set(0.5, 1, 1);
+  cubeCamera.add(cubeLight);
+
+  function faceTexture(label) {
+    const size = 128;
+    const face = document.createElement("canvas");
+    face.width = face.height = size;
+    const g = face.getContext("2d");
+    g.fillStyle = "#e4e4e7";
+    g.fillRect(0, 0, size, size);
+    g.strokeStyle = "#a1a1aa";
+    g.lineWidth = 6;
+    g.strokeRect(3, 3, size - 6, size - 6);
+    g.fillStyle = "#3f3f46";
+    g.font = "600 28px system-ui, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText(label, size / 2, size / 2);
+    const texture = new THREE.CanvasTexture(face);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+  }
+
+  // BoxGeometry's face order is +x, -x, +y, -y, +z, -z. Front is +z because
+  // render_3d's unrotated camera looks along -z.
+  const cube = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    ["Right", "Left", "Top", "Bottom", "Front", "Back"].map(
+      (label) => new THREE.MeshLambertMaterial({ map: faceTexture(label) }),
+    ),
+  );
+  cubeScene.add(cube);
+  cubeScene.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(cube.geometry),
+    new THREE.LineBasicMaterial({ color: 0x71717a }),
+  ));
+  const corner = new THREE.Vector3(-1.08, -1.08, -1.08);
+  for (const [axis, color] of [[[1, 0, 0], 0xef4444], [[0, 1, 0], 0x22c55e], [[0, 0, 1], 0x3b82f6]]) {
+    cubeScene.add(new THREE.ArrowHelper(new THREE.Vector3(...axis), corner, 2.8, color, 0.35, 0.2));
+  }
+
+  const highlight = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshBasicMaterial({ color: 0x2563eb, transparent: true, opacity: 0.45, depthWrite: false }),
+  );
+  highlight.visible = false;
+  cubeScene.add(highlight);
+
+  // Where a point on the cube's surface looks from: its face, plus the
+  // neighbouring face(s) when it is near an edge or corner. (1, 0, 0) is the
+  // Right face, (1, 1, 0) the top-right edge, (1, 1, 1) a corner.
+  function regionAt(point) {
+    return new THREE.Vector3(
+      ...point.toArray().map((c) => (Math.abs(c) > 0.6 ? Math.sign(c) : 0)),
+    );
+  }
+
+  const raycaster = new THREE.Raycaster();
+  function pick(event) {
+    const rect = cubeCanvas.getBoundingClientRect();
+    const pointer = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    raycaster.setFromCamera(pointer, cubeCamera);
+    const [hit] = raycaster.intersectObject(cube);
+    return hit ? regionAt(hit.point) : null;
+  }
+
+  function showHighlight(region) {
+    highlight.visible = region !== null;
+    cubeCanvas.style.cursor = region ? "pointer" : "";
+    if (!region) return;
+    // Faces span ±0.6 of the side; edges and corners the 0.4 beyond that.
+    // Each piece sits slightly proud of the cube so it isn't hidden by it.
+    const size = region.toArray().map((r) => (r === 0 ? 1.2 : 0.44));
+    const center = region.toArray().map((r) => r * 0.82);
+    highlight.scale.set(...size);
+    highlight.position.set(...center);
+  }
+
+  cubeCanvas.addEventListener("pointermove", (event) => showHighlight(pick(event)));
+  cubeCanvas.addEventListener("pointerleave", () => showHighlight(null));
+  cubeCanvas.addEventListener("click", (event) => {
+    const region = pick(event);
+    if (region) lookFrom(region);
+  });
+
+  function renderViewCube() {
+    cubeCamera.quaternion.copy(camera.quaternion);
+    cubeCamera.position.set(0, 0, 8).applyQuaternion(camera.quaternion);
+    cubeRenderer.render(cubeScene, cubeCamera);
+  }
+
+  const TURN_MS = 300;
+  let turn = null;
+
+  function lookFrom(direction) {
+    // Spend whatever drag momentum is left now, so it can't nudge the
+    // camera off the chosen view once the turn ends.
+    controls.enableDamping = false;
+    controls.update();
+    controls.enableDamping = true;
+    const end = direction.clone().normalize();
+    // OrbitControls can't look exactly along the up axis, so tilt the top and
+    // bottom views a hair towards the front.
+    if (Math.abs(end.y) > 0.999) end.set(0, Math.sign(end.y), 1e-3).normalize();
+    const start = camera.position.clone().sub(controls.target).normalize();
+    turn = {
+      start,
+      rotation: new THREE.Quaternion().setFromUnitVectors(start, end),
+      began: performance.now(),
+    };
+  }
+
+  function stepTurn(now) {
+    const t = Math.min((now - turn.began) / TURN_MS, 1);
+    const eased = t * (2 - t);
+    const direction = turn.start.clone()
+      .applyQuaternion(new THREE.Quaternion().slerp(turn.rotation, eased));
+    const distance = camera.position.distanceTo(controls.target);
+    camera.position.copy(controls.target).addScaledVector(direction, distance);
+    camera.lookAt(controls.target);
+    if (t === 1) turn = null;
   }
 
   // --- files -----------------------------------------------------------------
