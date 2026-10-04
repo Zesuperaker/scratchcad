@@ -26,23 +26,9 @@ Then start the server and the MCP server:
 docker compose up --build        # or `docker compose watch` to reload on edits
 ```
 
-Then add the MCP server (`http://localhost:8000/mcp`) to your agent:
+The mcp is already configured localy through .mcp.json
 
-```sh
-# Claude Code
-claude mcp add --transport http scratchcad http://localhost:8000/mcp
-
-# OpenAI Codex CLI
-codex mcp add scratchcad --url http://localhost:8000/mcp
-
-# Gemini CLI
-gemini mcp add --transport http scratchcad http://localhost:8000/mcp
-
-# VS Code (GitHub Copilot agent mode)
-code --add-mcp '{"name":"scratchcad","type":"http","url":"http://localhost:8000/mcp"}'
-```
-
-For other clients, point them at `http://localhost:8000/mcp` using the
+For clients that don't support .mcp.json, point them at `http://localhost:8000/mcp` using the
 streamable HTTP transport.
 
 ## Examples
