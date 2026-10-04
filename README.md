@@ -61,6 +61,10 @@ side recompiles in a few seconds), and changes to `Cargo.toml`, `Cargo.lock`,
 
 Exported STL files appear in `./output`. These will be the main file that you recieve from the agent unless you also explicitly ask for the Rhai script that the agent created to be saved to `./output`.  
 
+To look at them, open <http://localhost:8000/viewer> while the stack is running. It lists
+every STL in `./output`, newest first, and switches to each new export as the agent writes it.
+The page loads [three.js](https://threejs.org) from jsDelivr, so the browser needs internet access.
+
 ## Architecture 
 
 | directory | what it is |

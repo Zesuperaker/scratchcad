@@ -13,8 +13,15 @@ from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
 from mcp_types import TextContent
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
 
 from .client import BinaryResult, ScratchcadClient, ScratchcadError
 from .config import ConfigError, Settings
@@ -67,6 +74,8 @@ Workflow: validate_script first to catch errors cheaply, then render_3d to \
 see the shape, render_2d for a cross-section at z = 0 (move or rotate the \
 shape to slice elsewhere), evaluate to check exact dimensions (a point is \
 inside when its value is negative), and export_stl once it looks right."""
+
+VIEWER_HTML = Path(__file__).with_name("viewer.html").read_text(encoding="utf-8")
 
 Script = Annotated[
     str,
@@ -316,6 +325,24 @@ def create_server(
         """Liveness probe for HTTP mode (used by the dev container)."""
         return PlainTextResponse("ok")
 
+    @mcp.custom_route("/viewer", methods=["GET"], include_in_schema=False)
+    async def viewer(request: Request) -> HTMLResponse:
+        """Browser STL viewer for the files export_stl writes (HTTP mode only)."""
+        return HTMLResponse(VIEWER_HTML)
+
+    @mcp.custom_route("/viewer/files", methods=["GET"], include_in_schema=False)
+    async def viewer_files(request: Request) -> JSONResponse:
+        """The STL files in the output directory, newest first."""
+        return JSONResponse(await run_in_threadpool(_list_stl_files, settings.output_dir))
+
+    @mcp.custom_route("/viewer/files/{path:path}", methods=["GET"], include_in_schema=False)
+    async def viewer_file(request: Request) -> Response:
+        """One STL file from the output directory."""
+        target = _stl_in_output(settings.output_dir, request.path_params["path"])
+        if target is None:
+            return PlainTextResponse("not found", status_code=404)
+        return FileResponse(target, media_type="model/stl", headers={"cache-control": "no-cache"})
+
     return mcp
 
 
@@ -345,6 +372,35 @@ def _resolve_output(output_dir: Path, path: str, overwrite: bool) -> Path:
     if target.exists() and not overwrite:
         raise ToolError(f"{target} already exists; pass overwrite=true to replace it")
     return target
+
+
+def _stl_in_output(output_dir: Path, path: str) -> Path | None:
+    """The STL file at `path` inside the output directory, or None if there isn't one.
+
+    Like export_stl, paths that leave the directory (including through
+    symlinks) are refused.
+    """
+    output_dir = output_dir.resolve()
+    target = (output_dir / path).resolve()
+    if target.is_relative_to(output_dir) and target.suffix.lower() == ".stl" and target.is_file():
+        return target
+    return None
+
+
+def _list_stl_files(output_dir: Path) -> list[dict[str, Any]]:
+    """Every STL file under the output directory, skipping hidden directories."""
+    output_dir = output_dir.resolve()
+    files: list[dict[str, Any]] = []
+    for directory, subdirs, names in output_dir.walk():
+        subdirs[:] = [name for name in subdirs if not name.startswith(".")]
+        for name in names:
+            relative = (directory / name).relative_to(output_dir).as_posix()
+            target = _stl_in_output(output_dir, relative)
+            if target is not None:
+                stat = target.stat()
+                files.append({"path": relative, "bytes": stat.st_size, "modified": stat.st_mtime})
+    files.sort(key=lambda file: (-file["modified"], file["path"]))
+    return files
 
 
 def main() -> None:

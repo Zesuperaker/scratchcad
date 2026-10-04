@@ -67,6 +67,21 @@ always on, including when bound to `0.0.0.0` as in the container. FastMCP
 would otherwise switch it off for non-loopback binds. `GET /healthz` returns
 `ok` for health checks.
 
+## STL viewer
+
+In HTTP mode the server also serves a small browser viewer for the files
+`export_stl` writes, at `GET /viewer` (<http://localhost:8000/viewer> in the
+dev stack). It lists the `.stl` files in `SCRATCHCAD_MCP_OUTPUT_DIR`, newest
+first, polls for new or overwritten exports, and shows the selected one with
+orbit controls, its triangle count and its bounding-box size. The page is a
+single file, [`viewer.html`](src/scratchcad_mcp/viewer.html), with no build
+step: it loads [three.js](https://threejs.org) from jsDelivr.
+
+It uses two routes, which apply the same path rules as `export_stl`:
+`GET /viewer/files` lists the files as JSON (hidden directories are skipped),
+and `GET /viewer/files/<path>` returns one. Anything that isn't an `.stl` file
+inside the output directory, including symlinks that point out of it, is a 404.
+
 `export_stl` only writes `.stl` files inside `SCRATCHCAD_MCP_OUTPUT_DIR`. Paths
 that leave it (`..`, absolute paths elsewhere, symlinks) are refused, and an
 existing file is only replaced when the model passes `overwrite: true`.
@@ -85,7 +100,8 @@ The tests cover three layers:
 - `test_config.py` and `test_client.py`: settings parsing, and the HTTP client
   against a mock transport, including every error path
 - `test_server.py`: each tool through a real in-memory MCP client session,
-  covering schemas, request bodies, image content, path safety and error masking
+  covering schemas, request bodies, image content, path safety and error masking,
+  plus the viewer routes
 - `test_integration.py`: the MCP server against a real scratchcad binary, plus
   the `python -m scratchcad_mcp` process over stdio and over HTTP (including a
   forged `Host` header being rejected). The scratchcad tests use `$SCRATCHCAD_BIN` or

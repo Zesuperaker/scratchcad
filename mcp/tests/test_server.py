@@ -1,6 +1,7 @@
 """The MCP surface, exercised through a real MCP client session in memory."""
 
 import base64
+import os
 import runpy
 from pathlib import Path
 from typing import Any
@@ -553,6 +554,90 @@ async def test_healthz_route(server: FastMCP) -> None:
         response = await http.get("/healthz")
     assert response.status_code == 200
     assert response.text == "ok"
+
+
+# --- viewer -----------------------------------------------------------------
+
+
+async def http_get(server: FastMCP, path: str) -> httpx2.Response:
+    transport = httpx2.ASGITransport(app=server.http_app())
+    async with httpx2.AsyncClient(transport=transport, base_url="http://localhost") as http:
+        return await http.get(path)
+
+
+def write_stl(path: Path, data: bytes, mtime: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    os.utime(path, (mtime, mtime))
+
+
+async def test_viewer_page(server: FastMCP) -> None:
+    response = await http_get(server, "/viewer")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "STLLoader" in response.text
+    assert "/viewer/files" in response.text
+
+
+async def test_viewer_lists_stl_files_newest_first(server: FastMCP, settings: Settings) -> None:
+    out = settings.output_dir
+    write_stl(out / "old.stl", b"a", 1_000)
+    write_stl(out / "parts" / "new.STL", b"bbb", 3_000)
+    write_stl(out / "b.stl", b"cc", 2_000)
+    write_stl(out / "a.stl", b"cc", 2_000)
+    write_stl(out / "notes.txt", b"not a mesh", 4_000)
+    write_stl(out / ".cache" / "hidden.stl", b"x", 5_000)
+    (out / "folder.stl").mkdir()
+    response = await http_get(server, "/viewer/files")
+    assert response.status_code == 200
+    assert response.json() == [
+        {"path": "parts/new.STL", "bytes": 3, "modified": 3_000},
+        {"path": "a.stl", "bytes": 2, "modified": 2_000},
+        {"path": "b.stl", "bytes": 2, "modified": 2_000},
+        {"path": "old.stl", "bytes": 1, "modified": 1_000},
+    ]
+
+
+async def test_viewer_list_skips_symlinks_out_of_the_output_dir(
+    server: FastMCP, settings: Settings, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "secret.stl"
+    outside.write_bytes(b"secret")
+    (settings.output_dir / "link.stl").symlink_to(outside)
+    write_stl(settings.output_dir / "real.stl", b"ok", 1_000)
+    response = await http_get(server, "/viewer/files")
+    assert [file["path"] for file in response.json()] == ["real.stl"]
+    response = await http_get(server, "/viewer/files/link.stl")
+    assert response.status_code == 404
+
+
+async def test_viewer_list_of_a_missing_output_dir_is_empty(fake: FakeScratchcad) -> None:
+    settings = Settings(url="http://scratchcad.test", output_dir=Path("/nonexistent/scratchcad"))
+    response = await http_get(create_server(settings, fake.transport()), "/viewer/files")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_viewer_serves_an_stl_file(server: FastMCP, settings: Settings) -> None:
+    write_stl(settings.output_dir / "parts" / "my bolt.stl", b"solid-bytes", 1_000)
+    response = await http_get(server, "/viewer/files/parts/my%20bolt.stl?v=1000")
+    assert response.status_code == 200
+    assert response.content == b"solid-bytes"
+    assert response.headers["content-type"] == "model/stl"
+    assert response.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.parametrize(
+    "path", ["missing.stl", "notes.txt", "folder.stl", "..%2Fescape.stl", "%2Fetc%2Fpasswd"]
+)
+async def test_viewer_refuses_anything_but_stl_files_inside_the_output_dir(
+    server: FastMCP, settings: Settings, path: str
+) -> None:
+    write_stl(settings.output_dir / "notes.txt", b"text", 1_000)
+    write_stl(settings.output_dir.parent / "escape.stl", b"outside", 1_000)
+    (settings.output_dir / "folder.stl").mkdir()
+    response = await http_get(server, f"/viewer/files/{path}")
+    assert response.status_code == 404
 
 
 def test_main_exits_cleanly_on_bad_config(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,7 +5,8 @@
 #
 # Then point an MCP client at http://localhost:8000/mcp, e.g.
 #   claude mcp add --transport http scratchcad http://localhost:8000/mcp
-# STL files the model exports appear in ./output.
+# STL files the model exports appear in ./output; view them at
+# http://localhost:8000/viewer.
 #
 # Both ports are published on 127.0.0.1 only. The service runs without an API
 # token unless you put SCRATCHCAD_API_TOKEN=<16+ characters> in a .env file next
