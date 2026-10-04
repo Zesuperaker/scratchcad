@@ -6,7 +6,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = "==3.14.*"
 dependencies = [
-    "fastmcp==4.0.8",
+    "fastmcp==4.0.10",
     "httpx2==2.13.1",
     "starlette==1.7.0",
 ]
@@ -19,8 +19,8 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
-    "ruff==0.16.8",
-    "mypy==2.3.1",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
 ]
 
 [build-system]
