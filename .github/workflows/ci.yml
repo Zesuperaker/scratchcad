@@ -68,6 +68,25 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest --cov
 
+  viewer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: viewer
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: viewer/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run coverage
+      - run: npm run build
+
   dev-images:
     runs-on: ubuntu-latest
     steps:
@@ -86,3 +105,5 @@ jobs:
             server.cache-to=type=gha,scope=dev-server,mode=max
             mcp.cache-from=type=gha,scope=dev-mcp
             mcp.cache-to=type=gha,scope=dev-mcp,mode=max
+            viewer.cache-from=type=gha,scope=dev-viewer
+            viewer.cache-to=type=gha,scope=dev-viewer,mode=max

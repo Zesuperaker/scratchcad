@@ -20,11 +20,13 @@ cd scratchcad
 ```
 <!-- x-release-please-end -->
 
-Then start the server and the MCP server:
+Then start the server, the MCP server and the editor:
 
 ```sh
 docker compose up --build        # or `docker compose watch` to reload on edits
 ```
+
+Open the editor at <http://localhost:5173>.
 
 The mcp is already configured localy through .mcp.json
 
@@ -41,39 +43,52 @@ streamable HTTP transport.
 
 ## Docker info
 
-`compose.yaml` runs both dev images:
+`compose.yaml` runs three dev images:
 
 | service | port | image |
 |---|---|---|
 | `server` | `127.0.0.1:8080` | [`server/Dockerfile.dev`](server/Dockerfile.dev): `cargo run` with fast incremental rebuilds |
 | `mcp` | `127.0.0.1:8000` | [`mcp/Dockerfile.dev`](mcp/Dockerfile.dev): the MCP server over streamable HTTP at `/mcp` |
+| `viewer` | `127.0.0.1:5173` | [`viewer/Dockerfile.dev`](viewer/Dockerfile.dev): the editor's Vite dev server, with hot reload |
 
 Run the MCP checks inside its container with
-`docker compose run --rm mcp uv run pytest`.
+`docker compose run --rm mcp uv run pytest`, and the editor's with
+`docker compose run --rm viewer npm test`.
 
 With `docker compose watch`, edits
 under `server/src` or `mcp/src` restart the affected container (the Rust
-side recompiles in a few seconds), and changes to `Cargo.toml`, `Cargo.lock`,
-`pyproject.toml` or `uv.lock` rebuild its image. To require an API token, put
+side recompiles in a few seconds), edits under `viewer/src` hot-reload in the
+browser, and changes to `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
+`uv.lock`, `package.json` or `package-lock.json` rebuild its image. To require an API token, put
 `SCRATCHCAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
 
-## STL outputs
+## Scripts, the editor and STL files
 
-Exported STL files appear in `./output`. These will be the main file that you recieve from the agent unless you also explicitly ask for the Rhai script that the agent created to be saved to `./output`.  
+The agent delivers a part as a Rhai script, saved to `./output` with the
+`save_script` tool. Open it in the editor at <http://localhost:5173>:
 
-To look at them, open <http://localhost:8000/viewer> while the stack is running. It lists
-every STL in `./output`, newest first, and switches to each new export as the agent writes it.
-The page loads [three.js](https://threejs.org) from jsDelivr, so the browser needs internet access.
+- the part is meshed and shown as you type, with errors marked in the script
+- the dimensions the agent put in `let` lines at the top of the script appear
+  as sliders under **Parameters**
+- **Export STL** meshes the script and writes an `.stl` next to it, at the
+  detail chosen under **Region & export**
+
+The agent only exports an STL itself when you ask it to. If you edit a script
+and then ask the agent for changes, it reads your version first; if it
+changes a script while you have unsaved edits, the editor asks which version
+to keep.
 
 ## Architecture 
 
 | directory | what it is |
 |---|---|
 | [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
-| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's five endpoints as tools, so a model can write a script, look at renders, measure the part and export an STL. |
+| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's endpoints as tools, so a model can write a script, look at renders, measure the part and save the script (or export an STL). It also serves the output directory to the editor. |
+| [`viewer/`](viewer) | The editor (TypeScript, [React](https://react.dev), [Vite](https://vite.dev), [Tailwind](https://tailwindcss.com), [CodeMirror](https://codemirror.net), [three.js](https://threejs.org)): edit scripts with a live 3D preview and parameter sliders, and export STL files. |
 
-The two are independent: the MCP server talks to the service over HTTP, so it
-works with a local build, the dev containers, or a deployed instance.
+The three are independent: the MCP server talks to the service over HTTP, so
+it works with a local build, the dev containers, or a deployed instance. The
+editor's dev server proxies to both, so the browser only talks to one origin.
 
 ## License
 

@@ -1,16 +1,17 @@
-# Local development stack: the scratchcad service plus the MCP server over HTTP.
+# Local development stack: the scratchcad service, the MCP server over HTTP
+# and the editor.
 #
-#   docker compose up --build          # start both
-#   docker compose watch               # start both and reload on source changes
+#   docker compose up --build          # start all three
+#   docker compose watch               # start them and reload on source changes
 #
 # Then point an MCP client at http://localhost:8000/mcp, e.g.
 #   claude mcp add --transport http scratchcad http://localhost:8000/mcp
-# STL files the model exports appear in ./output; view them at
-# http://localhost:8000/viewer.
+# and open the editor at http://localhost:5173. The scripts the model saves
+# (and any STL files) are in ./output.
 #
-# Both ports are published on 127.0.0.1 only. The service runs without an API
+# All ports are published on 127.0.0.1 only. The service runs without an API
 # token unless you put SCRATCHCAD_API_TOKEN=<16+ characters> in a .env file next
-# to this one; both containers read it.
+# to this one; every container reads it.
 
 name: scratchcad
 
@@ -62,6 +63,38 @@ services:
         - path: ./mcp/pyproject.toml
           action: rebuild
         - path: ./mcp/uv.lock
+          action: rebuild
+
+  viewer:
+    build:
+      context: ./viewer
+      dockerfile: Dockerfile.dev
+    ports:
+      - "127.0.0.1:5173:5173"
+    env_file: *env
+    environment:
+      SCRATCHCAD_URL: http://server:8080
+      SCRATCHCAD_MCP_URL: http://mcp:8000
+    depends_on:
+      server:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+    develop:
+      watch:
+        # Vite hot-reloads synced sources itself, so no restart is needed.
+        - path: ./viewer/src
+          target: /app/src
+          action: sync
+        - path: ./viewer/index.html
+          target: /app/index.html
+          action: sync
+        - path: ./viewer/vite.config.ts
+          target: /app/vite.config.ts
+          action: sync+restart
+        - path: ./viewer/package.json
+          action: rebuild
+        - path: ./viewer/package-lock.json
           action: rebuild
 
 volumes:

@@ -14,7 +14,9 @@ over stdio by default, or over streamable HTTP in the dev container.
 | `render_3d` | `POST /v1/raster/3d` | See the part: returns a shaded PNG as MCP image content |
 | `render_2d` | `POST /v1/raster/2d` | See inside the part: the cross-section at z = 0 |
 | `evaluate` | `POST /v1/eval` | Measure exactly: field values, gradients or interval bounds |
-| `export_stl` | `POST /v1/export/stl` | Write the finished mesh to a `.stl` file |
+| `save_script` | `POST /v1/scripts/validate` | Deliver the part: check the script and save it as `.rhai`, recording its region |
+| `read_script` | — | Read a saved script back, including the user's edits from the editor |
+| `export_stl` | `POST /v1/export/stl` | Write a mesh to a `.stl` file, when the user asks for one |
 
 The server's MCP `instructions` carry a scripting guide: the shape
 constructors, how `draw` works, the units, and how to size the view region
@@ -56,7 +58,7 @@ claude mcp add scratchcad -- uv run --project "$PWD/mcp" scratchcad-mcp
 | `SCRATCHCAD_URL` | `http://127.0.0.1:8080` | where scratchcad is listening |
 | `SCRATCHCAD_API_TOKEN` | unset | bearer token, if scratchcad was started with one |
 | `SCRATCHCAD_MCP_TIMEOUT_S` | `60` | HTTP timeout per request |
-| `SCRATCHCAD_MCP_OUTPUT_DIR` | the working directory | where `export_stl` writes files |
+| `SCRATCHCAD_MCP_OUTPUT_DIR` | the working directory | where `save_script` and `export_stl` write files |
 | `SCRATCHCAD_MCP_TRANSPORT` | `stdio` | `stdio`, or `http` for streamable HTTP at `/mcp` |
 | `SCRATCHCAD_MCP_HOST` | `127.0.0.1` | HTTP bind address |
 | `SCRATCHCAD_MCP_PORT` | `8000` | HTTP port |
@@ -67,26 +69,32 @@ always on, including when bound to `0.0.0.0` as in the container. FastMCP
 would otherwise switch it off for non-loopback binds. `GET /healthz` returns
 `ok` for health checks.
 
-## STL viewer
+## Scripts and the file API
 
-In HTTP mode the server also serves a small browser viewer for the files
-`export_stl` writes, at `GET /viewer` (<http://localhost:8000/viewer> in the
-dev stack). It lists the `.stl` files in `SCRATCHCAD_MCP_OUTPUT_DIR`, newest
-first, polls for new or overwritten exports, and shows the selected one with
-orbit controls, its triangle count and its bounding-box size. A view cube in
-the corner turns with the camera; click one of its faces, edges or corners to
-look from that side (Front is +z and Top is +y, as in `render_3d`). The page is a
-single file, [`viewer.html`](src/scratchcad_mcp/viewer.html), with no build
-step: it loads [three.js](https://threejs.org) from jsDelivr.
+A saved script's first line records the region to mesh, so the editor (and
+anyone else) can mesh it without guessing:
 
-It uses two routes, which apply the same path rules as `export_stl`:
-`GET /viewer/files` lists the files as JSON (hidden directories are skipped),
-and `GET /viewer/files/<path>` returns one. Anything that isn't an `.stl` file
-inside the output directory, including symlinks that point out of it, is a 404.
+```
+// region: center=[0, 0, 0] half_size=30
+```
 
-`export_stl` only writes `.stl` files inside `SCRATCHCAD_MCP_OUTPUT_DIR`. Paths
-that leave it (`..`, absolute paths elsewhere, symlinks) are refused, and an
-existing file is only replaced when the model passes `overwrite: true`.
+`save_script` writes that line from its `center` and `half_size` arguments,
+keeping the script's existing one when they are left out. The guide also asks
+the model to put editable dimensions in top-level lines like
+`let width = 20.0; // [5, 50] Width (mm)`, which the editor shows as sliders.
+
+In HTTP mode the server serves the output directory to the
+[editor](../viewer), with the same path rules as the tools:
+
+| route | |
+|---|---|
+| `GET /files` | The `.rhai` and `.stl` files, newest first, each with a `version` (hidden directories are skipped) |
+| `GET /files/<path>` | One file, with its version in the `x-version` header |
+| `PUT /files/<path>` | Write a file atomically. With `x-expected-version: <version>` the write is refused with 409 if the file changed since; with `new`, if it exists. |
+
+Anything that isn't a `.rhai` or `.stl` file inside the output directory,
+including symlinks that point out of it, is refused. Errors use the scratchcad
+service's format, `{"error": {"code": ..., "message": ...}}`.
 
 ## Development
 
@@ -103,7 +111,7 @@ The tests cover three layers:
   against a mock transport, including every error path
 - `test_server.py`: each tool through a real in-memory MCP client session,
   covering schemas, request bodies, image content, path safety and error masking,
-  plus the viewer routes
+  plus the file API
 - `test_integration.py`: the MCP server against a real scratchcad binary, plus
   the `python -m scratchcad_mcp` process over stdio and over HTTP (including a
   forged `Host` header being rejected). The scratchcad tests use `$SCRATCHCAD_BIN` or
