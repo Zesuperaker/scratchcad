@@ -9,6 +9,19 @@ can use it.
 
 ## Quick start (requires docker)
 
+Clone the repo and check out the
+[latest release](https://github.com/Zesuperaker/scratchcad/releases/latest).
+`main` moves fast and may be broken between releases.
+
+<!-- x-release-please-start-version -->
+```sh
+git clone --branch v0.1.1 https://github.com/Zesuperaker/scratchcad.git
+cd scratchcad
+```
+<!-- x-release-please-end -->
+
+Then start the server and the MCP server:
+
 ```sh
 docker compose up --build        # or `docker compose watch` to reload on edits
 ```
