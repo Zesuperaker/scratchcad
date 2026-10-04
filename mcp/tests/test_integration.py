@@ -25,6 +25,8 @@ from mcp_types import ImageContent, TextContent
 from scratchcad_mcp.config import Settings
 from scratchcad_mcp.server import create_server
 
+from .conftest import TOOLS
+
 TOKEN = "integration-test-token"
 SERVER_DIR = Path(__file__).resolve().parents[2] / "server"
 
@@ -131,6 +133,16 @@ async def test_full_modelling_workflow(scratchcad_url: str, tmp_path: Path) -> N
         assert exported.structured_content["triangles"] == triangles > 0
         assert exported.structured_content["bytes"] == len(stl) == 84 + 50 * triangles
 
+        # The saved script, region line included, is still a valid script.
+        saved = await client.call_tool(
+            "save_script", {"script": CUBE, "path": "cube.rhai", "half_size": 12}
+        )
+        assert saved.data.nodes == validated.data["nodes"]
+        read = await client.call_tool("read_script", {"path": "cube.rhai"})
+        assert read.data.half_size == 12
+        revalidated = await client.call_tool("validate_script", {"script": read.data.script})
+        assert revalidated.data["nodes"] == validated.data["nodes"]
+
 
 async def test_real_script_error_is_readable(scratchcad_url: str, tmp_path: Path) -> None:
     async with Client(create_server(real_settings(scratchcad_url, tmp_path))) as client:
@@ -178,7 +190,7 @@ async def test_stdio_entry_point_lists_tools(tmp_path: Path) -> None:
     async with stdio_client(env, tmp_path) as client:
         names = {tool.name for tool in await client.list_tools()}
         result = await client.call_tool("validate_script", {"script": CUBE}, raise_on_error=False)
-    assert names == {"validate_script", "evaluate", "render_2d", "render_3d", "export_stl"}
+    assert names == TOOLS
     assert result.is_error
     [content] = result.content
     assert isinstance(content, TextContent)
@@ -240,7 +252,7 @@ async def test_http_transport_serves_mcp(http_mcp: str) -> None:
     async with Client(StreamableHttpTransport(f"{http_mcp}/mcp")) as client:
         names = {tool.name for tool in await client.list_tools()}
         result = await client.call_tool("validate_script", {"script": CUBE}, raise_on_error=False)
-    assert names == {"validate_script", "evaluate", "render_2d", "render_3d", "export_stl"}
+    assert names == TOOLS
     [content] = result.content
     assert isinstance(content, TextContent)
     assert "could not reach scratchcad" in content.text

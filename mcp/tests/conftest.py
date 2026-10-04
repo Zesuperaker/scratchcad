@@ -12,6 +12,16 @@ from fastmcp import Client, FastMCP
 from scratchcad_mcp.config import Settings
 from scratchcad_mcp.server import create_server
 
+TOOLS = {
+    "validate_script",
+    "evaluate",
+    "render_2d",
+    "render_3d",
+    "export_stl",
+    "save_script",
+    "read_script",
+}
+
 # Smallest valid PNG header; the tools pass image bytes through untouched.
 PNG = b"\x89PNG\r\n\x1a\nfake"
 

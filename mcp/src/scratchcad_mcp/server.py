@@ -1,7 +1,8 @@
-"""MCP server exposing the scratchcad API as five tools."""
+"""MCP server exposing the scratchcad API as tools, plus the editor's file API."""
 
 import sys
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -15,16 +16,16 @@ from mcp_types import TextContent
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import (
-    FileResponse,
-    HTMLResponse,
-    JSONResponse,
-    PlainTextResponse,
-    Response,
-)
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
+from . import workspace
 from .client import BinaryResult, ScratchcadClient, ScratchcadError
 from .config import ConfigError, Settings
+from .workspace import MESH, SCRIPT, Region, WorkspaceError
+
+# Upload limits for the editor's file API.
+MAX_SCRIPT_BYTES = 1024 * 1024
+MAX_MESH_BYTES = 256 * 1024 * 1024
 
 GUIDE = """\
 scratchcad models solids as implicit surfaces written in Rhai scripts. The field \
@@ -73,9 +74,24 @@ sides of the region the shape reaches.
 Workflow: validate_script first to catch errors cheaply, then render_3d to \
 see the shape, render_2d for a cross-section at z = 0 (move or rotate the \
 shape to slice elsewhere), evaluate to check exact dimensions (a point is \
-inside when its value is negative), and export_stl once it looks right."""
+inside when its value is negative), and save_script once it looks right.
 
-VIEWER_HTML = Path(__file__).with_name("viewer.html").read_text(encoding="utf-8")
+The saved .rhai script is the deliverable: the user opens it in the scratchcad \
+editor, which previews it, lets them change it and exports STL files. Only \
+call export_stl when the user asks for an STL. Pass save_script the center \
+and half_size that enclose the part; it records them on the script's first \
+line so the editor meshes the right region.
+
+Put the dimensions someone might want to change in top-level `let` lines at \
+the start of the script, one per line, with an optional [min, max] range and a \
+description in a trailing comment. The editor turns them into sliders:
+  let thread_length = 26.0; // [10, 60] Thread length (mm)
+  let blade_count = 29; // [3, 60] Number of blades
+Keep integers as integers and floats with a decimal point, as Rhai is strict \
+about mixing them.
+
+The user may edit a saved script in the editor at any time. Before changing a \
+script you saved earlier, read_script it again and build on what is there."""
 
 Script = Annotated[
     str,
@@ -92,6 +108,21 @@ HalfSize = Annotated[
     Field(gt=0, description="The region covered is center ± half_size on each axis."),
 ]
 Pixels = Annotated[int, Field(ge=1, description="Image size in pixels.")]
+
+
+class SavedScript(BaseModel):
+    path: str = Field(description="Absolute path of the written .rhai file.")
+    bytes: int
+    nodes: int = Field(description="Node count of the script's math graph.")
+    center: Vec3
+    half_size: float
+
+
+class ScriptFile(BaseModel):
+    path: str = Field(description="Absolute path of the .rhai file.")
+    script: str = Field(description="The file's text, including its region line.")
+    center: Vec3 | None = Field(description="Center from the region line, if it has one.")
+    half_size: float | None = Field(description="half_size from the region line, if any.")
 
 
 class StlExport(BaseModel):
@@ -298,7 +329,7 @@ def create_server(
         Vertices are in model coordinates. Only the cube center ± half_size is
         meshed, so make it enclose the whole part.
         """
-        target = _resolve_output(settings.output_dir, path, overwrite)
+        target = _writable(settings.output_dir, path, MESH, overwrite)
         result = await call(
             ctx,
             ScratchcadClient.export_stl,
@@ -310,8 +341,7 @@ def create_server(
                 "evaluator": evaluator,
             },
         )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(result.data)
+        workspace.write(target, result.data)
         return StlExport(
             path=str(target),
             bytes=len(result.data),
@@ -325,23 +355,143 @@ def create_server(
         """Liveness probe for HTTP mode (used by the dev container)."""
         return PlainTextResponse("ok")
 
-    @mcp.custom_route("/viewer", methods=["GET"], include_in_schema=False)
-    async def viewer(request: Request) -> HTMLResponse:
-        """Browser STL viewer for the files export_stl writes (HTTP mode only)."""
-        return HTMLResponse(VIEWER_HTML)
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True})
+    async def save_script(
+        script: Script,
+        path: Annotated[
+            str,
+            Field(
+                description="Where to write the .rhai file, relative to the output "
+                "directory (SCRATCHCAD_MCP_OUTPUT_DIR). It cannot leave that directory."
+            ),
+        ],
+        ctx: Context,
+        center: Annotated[
+            Vec3 | None,
+            Field(
+                description="Center of the region that encloses the part. Leave unset "
+                "to keep the script's existing region line, or (0, 0, 0)."
+            ),
+        ] = None,
+        half_size: Annotated[
+            float | None,
+            Field(
+                gt=0,
+                description="The region is center ± half_size on each axis. Leave "
+                "unset to keep the script's existing region line, or 1.",
+            ),
+        ] = None,
+        overwrite: Annotated[
+            bool, Field(description="Replace the file if it already exists.")
+        ] = False,
+    ) -> SavedScript:
+        """Check the script and save it as a .rhai file the user can open in the editor.
 
-    @mcp.custom_route("/viewer/files", methods=["GET"], include_in_schema=False)
-    async def viewer_files(request: Request) -> JSONResponse:
-        """The STL files in the output directory, newest first."""
-        return JSONResponse(await run_in_threadpool(_list_stl_files, settings.output_dir))
+        This is how a finished part is delivered. The first line of the file
+        records the region (center and half_size) the editor meshes.
+        """
+        target = _writable(settings.output_dir, path, SCRIPT, overwrite)
+        existing = workspace.parse_region(script) or Region()
+        region = Region(
+            center=center if center is not None else existing.center,
+            half_size=half_size if half_size is not None else existing.half_size,
+        )
+        checked = await call(ctx, ScratchcadClient.validate, {"script": script})
+        text = workspace.with_region(script, region).encode()
+        workspace.write(target, text)
+        return SavedScript(
+            path=str(target),
+            bytes=len(text),
+            nodes=checked["nodes"],
+            center=region.center,
+            half_size=region.half_size,
+        )
 
-    @mcp.custom_route("/viewer/files/{path:path}", methods=["GET"], include_in_schema=False)
-    async def viewer_file(request: Request) -> Response:
-        """One STL file from the output directory."""
-        target = _stl_in_output(settings.output_dir, request.path_params["path"])
-        if target is None:
-            return PlainTextResponse("not found", status_code=404)
-        return FileResponse(target, media_type="model/stl", headers={"cache-control": "no-cache"})
+    @mcp.tool(annotations=read_only)
+    async def read_script(
+        path: Annotated[
+            str,
+            Field(description="The .rhai file to read, relative to the output directory."),
+        ],
+    ) -> ScriptFile:
+        """Read a saved script, including any changes the user made in the editor."""
+        try:
+            target = workspace.resolve(settings.output_dir, path, (SCRIPT,))
+            text = target.read_text(encoding="utf-8")
+        except WorkspaceError as exc:
+            raise ToolError(str(exc)) from None
+        except FileNotFoundError:
+            raise ToolError(f"{path} does not exist") from None
+        except UnicodeDecodeError:
+            raise ToolError(f"{path} is not UTF-8 text") from None
+        region = workspace.parse_region(text)
+        return ScriptFile(
+            path=str(target),
+            script=text,
+            center=region.center if region else None,
+            half_size=region.half_size if region else None,
+        )
+
+    # --- file API for the editor (HTTP mode only) ---------------------------
+
+    @mcp.custom_route("/files", methods=["GET"], include_in_schema=False)
+    async def list_files(request: Request) -> JSONResponse:
+        """The scripts and meshes in the output directory, newest first."""
+        entries = await run_in_threadpool(workspace.list_files, settings.output_dir)
+        return JSONResponse([asdict(e) for e in entries])
+
+    @mcp.custom_route("/files/{path:path}", methods=["GET"], include_in_schema=False)
+    async def read_file(request: Request) -> Response:
+        """One script (as UTF-8 text) or mesh, with its version in `x-version`."""
+        path = request.path_params["path"]
+        try:
+            target = workspace.resolve(settings.output_dir, path, (SCRIPT, MESH))
+        except WorkspaceError as exc:
+            return _file_error(400, "invalid_path", str(exc))
+        if not target.is_file():
+            return _file_error(404, "not_found", f"{path} does not exist")
+        media_type = "model/stl" if target.suffix.lower() == MESH else "text/plain; charset=utf-8"
+        return FileResponse(
+            target,
+            media_type=media_type,
+            headers={"cache-control": "no-cache", "x-version": workspace.version(target)},
+        )
+
+    @mcp.custom_route("/files/{path:path}", methods=["PUT"], include_in_schema=False)
+    async def write_file(request: Request) -> Response:
+        """Write a script or mesh.
+
+        Send `x-expected-version` with the version you last read to refuse the
+        write (409) if the file changed since, or `new` to refuse replacing an
+        existing file.
+        """
+        path = request.path_params["path"]
+        try:
+            target = workspace.resolve(settings.output_dir, path, (SCRIPT, MESH))
+        except WorkspaceError as exc:
+            return _file_error(400, "invalid_path", str(exc))
+        limit = MAX_SCRIPT_BYTES if target.suffix.lower() == SCRIPT else MAX_MESH_BYTES
+        if int(request.headers.get("content-length") or 0) > limit:
+            return _file_error(413, "too_large", f"{path} is larger than {limit} bytes")
+        data = await request.body()
+        if len(data) > limit:
+            return _file_error(413, "too_large", f"{path} is larger than {limit} bytes")
+        if target.suffix.lower() == SCRIPT:
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                return _file_error(400, "not_utf8", "scripts must be UTF-8 text")
+        expected = request.headers.get("x-expected-version")
+        current = workspace.version(target) if target.is_file() else None
+        if expected is not None and expected != (current or "new"):
+            return _file_error(
+                409,
+                "conflict",
+                f"{path} changed since it was read" if current else f"{path} was deleted",
+                current=current,
+            )
+        await run_in_threadpool(workspace.write, target, data)
+        return JSONResponse(asdict(workspace.entry(settings.output_dir, target)))
 
     return mcp
 
@@ -358,49 +508,20 @@ def _drop_none(body: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in body.items() if value is not None}
 
 
-def _resolve_output(output_dir: Path, path: str, overwrite: bool) -> Path:
-    if not path.strip():
-        raise ToolError("path must not be empty")
-    output_dir = output_dir.resolve()
-    target = (output_dir / path).resolve()
-    if not target.is_relative_to(output_dir):
-        raise ToolError(f"path must stay inside the output directory {output_dir}")
-    if target.suffix.lower() != ".stl":
-        raise ToolError("path must end in .stl")
-    if target.is_dir():
-        raise ToolError(f"{target} is a directory")
+def _writable(output_dir: Path, path: str, suffix: str, overwrite: bool) -> Path:
+    """Where a tool may write `path`, or a ToolError saying why it may not."""
+    try:
+        target = workspace.resolve(output_dir, path, (suffix,))
+    except WorkspaceError as exc:
+        raise ToolError(str(exc)) from None
     if target.exists() and not overwrite:
         raise ToolError(f"{target} already exists; pass overwrite=true to replace it")
     return target
 
 
-def _stl_in_output(output_dir: Path, path: str) -> Path | None:
-    """The STL file at `path` inside the output directory, or None if there isn't one.
-
-    Like export_stl, paths that leave the directory (including through
-    symlinks) are refused.
-    """
-    output_dir = output_dir.resolve()
-    target = (output_dir / path).resolve()
-    if target.is_relative_to(output_dir) and target.suffix.lower() == ".stl" and target.is_file():
-        return target
-    return None
-
-
-def _list_stl_files(output_dir: Path) -> list[dict[str, Any]]:
-    """Every STL file under the output directory, skipping hidden directories."""
-    output_dir = output_dir.resolve()
-    files: list[dict[str, Any]] = []
-    for directory, subdirs, names in output_dir.walk():
-        subdirs[:] = [name for name in subdirs if not name.startswith(".")]
-        for name in names:
-            relative = (directory / name).relative_to(output_dir).as_posix()
-            target = _stl_in_output(output_dir, relative)
-            if target is not None:
-                stat = target.stat()
-                files.append({"path": relative, "bytes": stat.st_size, "modified": stat.st_mtime})
-    files.sort(key=lambda file: (-file["modified"], file["path"]))
-    return files
+def _file_error(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
+    """An error in the scratchcad service's format: {"error": {"code", "message"}}."""
+    return JSONResponse({"error": {"code": code, "message": message, **extra}}, status)
 
 
 def main() -> None:

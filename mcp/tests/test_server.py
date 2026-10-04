@@ -15,10 +15,10 @@ from scratchcad_mcp import server as server_module
 from scratchcad_mcp.config import Settings
 from scratchcad_mcp.server import GUIDE, create_server
 
-from .conftest import PNG, FakeScratchcad, scratchcad_error
+from .conftest import PNG, TOOLS, FakeScratchcad, scratchcad_error
 
 SCRIPT = "draw(sphere(#{ radius: 0.5 }))"
-TOOLS = {"validate_script", "evaluate", "render_2d", "render_3d", "export_stl"}
+WRITING = {"export_stl", "save_script"}
 
 
 async def call_error(client: Client[Any], tool: str, arguments: dict[str, Any]) -> str:
@@ -33,13 +33,24 @@ async def call_error(client: Client[Any], tool: str, arguments: dict[str, Any]) 
 # --- discovery -------------------------------------------------------------
 
 
-async def test_lists_exactly_the_five_tools(client: Client[Any]) -> None:
+async def test_lists_exactly_the_tools(client: Client[Any]) -> None:
     assert {tool.name for tool in await client.list_tools()} == TOOLS
 
 
 async def test_instructions_carry_the_scripting_guide(client: Client[Any]) -> None:
     assert client.instructions == GUIDE
-    for needle in ("draw(shape)", "difference(", "degrees", "half_size", "negative", "finite"):
+    for needle in (
+        "draw(shape)",
+        "difference(",
+        "degrees",
+        "half_size",
+        "negative",
+        "finite",
+        "save_script",
+        "read_script",
+        "call export_stl when the user asks",
+        "// [10, 60]",
+    ):
         assert needle in GUIDE
 
 
@@ -48,22 +59,24 @@ async def test_every_tool_documents_every_parameter(client: Client[Any]) -> None
         assert tool.description, tool.name
         properties = tool.input_schema["properties"]
         assert "ctx" not in properties
-        assert "script" in tool.input_schema["required"]
+        required = "path" if tool.name == "read_script" else "script"
+        assert required in tool.input_schema["required"]
         for name, schema in properties.items():
             assert schema.get("description"), f"{tool.name}.{name} has no description"
 
 
-async def test_annotations_mark_only_export_as_writing(client: Client[Any]) -> None:
+async def test_annotations_mark_only_export_and_save_as_writing(client: Client[Any]) -> None:
     tools = {tool.name: tool for tool in await client.list_tools()}
-    for name in TOOLS - {"export_stl"}:
+    for name in TOOLS - WRITING:
         annotations = tools[name].annotations
         assert annotations is not None
         assert annotations.read_only_hint is True
         assert annotations.idempotent_hint is True
-    export = tools["export_stl"].annotations
-    assert export is not None
-    assert export.read_only_hint is False
-    assert export.destructive_hint is True
+    for name in WRITING:
+        annotations = tools[name].annotations
+        assert annotations is not None
+        assert annotations.read_only_hint is False
+        assert annotations.destructive_hint is True
 
 
 async def test_schemas_carry_the_input_constraints(client: Client[Any]) -> None:
@@ -556,88 +569,285 @@ async def test_healthz_route(server: FastMCP) -> None:
     assert response.text == "ok"
 
 
-# --- viewer -----------------------------------------------------------------
+# --- save_script / read_script ------------------------------------------------
 
 
-async def http_get(server: FastMCP, path: str) -> httpx2.Response:
+async def test_save_script_validates_and_writes_with_a_region_line(
+    client: Client[Any], fake: FakeScratchcad, settings: Settings
+) -> None:
+    result = await client.call_tool(
+        "save_script",
+        {"script": SCRIPT, "path": "parts/ball.rhai", "center": [1, 2, 3], "half_size": 2.5},
+    )
+    target = settings.output_dir / "parts" / "ball.rhai"
+    text = f"// region: center=[1, 2, 3] half_size=2.5\n{SCRIPT}\n"
+    assert target.read_text() == text
+    assert result.structured_content == {
+        "path": str(target),
+        "bytes": len(text),
+        "nodes": 9,
+        "center": [1.0, 2.0, 3.0],
+        "half_size": 2.5,
+    }
+    assert fake.last.url.path == "/v1/scripts/validate"
+    assert fake.last_body == {"script": SCRIPT}
+
+
+async def test_save_script_keeps_or_replaces_an_existing_region_line(
+    client: Client[Any], settings: Settings
+) -> None:
+    script = f"// region: center=[0, 0, 5] half_size=12\n{SCRIPT}"
+    await client.call_tool("save_script", {"script": script, "path": "a.rhai"})
+    assert (settings.output_dir / "a.rhai").read_text() == f"{script}\n"
+    await client.call_tool("save_script", {"script": script, "path": "b.rhai", "half_size": 20})
+    assert (
+        (settings.output_dir / "b.rhai")
+        .read_text()
+        .startswith("// region: center=[0, 0, 5] half_size=20\n")
+    )
+
+
+async def test_save_script_defaults_to_the_unit_region(
+    client: Client[Any], settings: Settings
+) -> None:
+    await client.call_tool("save_script", {"script": SCRIPT, "path": "a.rhai"})
+    assert (settings.output_dir / "a.rhai").read_text() == (
+        f"// region: center=[0, 0, 0] half_size=1\n{SCRIPT}\n"
+    )
+
+
+async def test_save_script_writes_nothing_for_an_invalid_script(
+    client: Client[Any], fake: FakeScratchcad, settings: Settings
+) -> None:
+    fake.handler = scratchcad_error(422, "script_error", "script error: oops (line 1, position 2)")
+    text = await call_error(client, "save_script", {"script": "let", "path": "bad.rhai"})
+    assert text == "script_error: script error: oops (line 1, position 2)"
+    assert not (settings.output_dir / "bad.rhai").exists()
+
+
+async def test_save_script_refuses_to_overwrite_by_default(
+    client: Client[Any], fake: FakeScratchcad, settings: Settings
+) -> None:
+    target = settings.output_dir / "a.rhai"
+    target.write_text("// mine\n")
+    text = await call_error(client, "save_script", {"script": SCRIPT, "path": "a.rhai"})
+    assert "already exists" in text
+    assert fake.requests == []
+    await client.call_tool("save_script", {"script": SCRIPT, "path": "a.rhai", "overwrite": True})
+    assert SCRIPT in target.read_text()
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [("../a.rhai", "inside the output directory"), ("a.stl", "end in .rhai"), ("", "empty")],
+)
+async def test_save_script_rejects_bad_paths(
+    client: Client[Any], fake: FakeScratchcad, path: str, message: str
+) -> None:
+    text = await call_error(client, "save_script", {"script": SCRIPT, "path": path})
+    assert message in text
+    assert fake.requests == []
+
+
+async def test_read_script_returns_the_text_and_region(
+    client: Client[Any], fake: FakeScratchcad, settings: Settings
+) -> None:
+    text = f"// region: center=[0, -1, 0] half_size=4\n{SCRIPT}\n"
+    (settings.output_dir / "a.rhai").write_text(text)
+    result = await client.call_tool("read_script", {"path": "a.rhai"})
+    assert result.structured_content == {
+        "path": str(settings.output_dir / "a.rhai"),
+        "script": text,
+        "center": [0.0, -1.0, 0.0],
+        "half_size": 4.0,
+    }
+    assert fake.requests == []
+
+
+async def test_read_script_without_a_region_line(client: Client[Any], settings: Settings) -> None:
+    (settings.output_dir / "a.rhai").write_text(SCRIPT)
+    result = await client.call_tool("read_script", {"path": "a.rhai"})
+    assert result.structured_content is not None
+    assert result.structured_content["center"] is None
+    assert result.structured_content["half_size"] is None
+
+
+async def test_read_script_errors(client: Client[Any], settings: Settings) -> None:
+    (settings.output_dir / "binary.rhai").write_bytes(b"\xff\xfe")
+    assert "not UTF-8" in await call_error(client, "read_script", {"path": "binary.rhai"})
+    assert "does not exist" in await call_error(client, "read_script", {"path": "nope.rhai"})
+    assert "end in .rhai" in await call_error(client, "read_script", {"path": "a.stl"})
+
+
+# --- file API for the editor ------------------------------------------------
+
+
+async def http(server: FastMCP, method: str, path: str, **kwargs: Any) -> httpx2.Response:
     transport = httpx2.ASGITransport(app=server.http_app())
-    async with httpx2.AsyncClient(transport=transport, base_url="http://localhost") as http:
-        return await http.get(path)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://localhost") as client:
+        return await client.request(method, path, **kwargs)
 
 
-def write_stl(path: Path, data: bytes, mtime: int) -> None:
+def write_file(path: Path, data: bytes, mtime: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     os.utime(path, (mtime, mtime))
 
 
-async def test_viewer_page(server: FastMCP) -> None:
-    response = await http_get(server, "/viewer")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert "STLLoader" in response.text
-    assert "/viewer/files" in response.text
-
-
-async def test_viewer_lists_stl_files_newest_first(server: FastMCP, settings: Settings) -> None:
+async def test_files_lists_scripts_and_meshes_newest_first(
+    server: FastMCP, settings: Settings
+) -> None:
     out = settings.output_dir
-    write_stl(out / "old.stl", b"a", 1_000)
-    write_stl(out / "parts" / "new.STL", b"bbb", 3_000)
-    write_stl(out / "b.stl", b"cc", 2_000)
-    write_stl(out / "a.stl", b"cc", 2_000)
-    write_stl(out / "notes.txt", b"not a mesh", 4_000)
-    write_stl(out / ".cache" / "hidden.stl", b"x", 5_000)
+    write_file(out / "old.stl", b"a", 1_000)
+    write_file(out / "parts" / "new.RHAI", b"bbb", 3_000)
+    write_file(out / "b.stl", b"cc", 2_000)
+    write_file(out / "a.rhai", b"cc", 2_000)
+    write_file(out / "notes.txt", b"not a part", 4_000)
+    write_file(out / ".cache" / "hidden.stl", b"x", 5_000)
     (out / "folder.stl").mkdir()
-    response = await http_get(server, "/viewer/files")
+    response = await http(server, "GET", "/files")
     assert response.status_code == 200
-    assert response.json() == [
-        {"path": "parts/new.STL", "bytes": 3, "modified": 3_000},
-        {"path": "a.stl", "bytes": 2, "modified": 2_000},
-        {"path": "b.stl", "bytes": 2, "modified": 2_000},
-        {"path": "old.stl", "bytes": 1, "modified": 1_000},
+    files = response.json()
+    assert [(f["path"], f["kind"], f["bytes"], f["modified"]) for f in files] == [
+        ("parts/new.RHAI", "script", 3, 3_000),
+        ("a.rhai", "script", 2, 2_000),
+        ("b.stl", "mesh", 2, 2_000),
+        ("old.stl", "mesh", 1, 1_000),
     ]
+    assert all(f["version"] for f in files)
 
 
-async def test_viewer_list_skips_symlinks_out_of_the_output_dir(
+async def test_files_skips_symlinks_out_of_the_output_dir(
     server: FastMCP, settings: Settings, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    outside = tmp_path_factory.mktemp("outside") / "secret.stl"
-    outside.write_bytes(b"secret")
-    (settings.output_dir / "link.stl").symlink_to(outside)
-    write_stl(settings.output_dir / "real.stl", b"ok", 1_000)
-    response = await http_get(server, "/viewer/files")
-    assert [file["path"] for file in response.json()] == ["real.stl"]
-    response = await http_get(server, "/viewer/files/link.stl")
-    assert response.status_code == 404
+    outside = tmp_path_factory.mktemp("outside") / "secret.rhai"
+    outside.write_text("secret")
+    (settings.output_dir / "link.rhai").symlink_to(outside)
+    write_file(settings.output_dir / "real.stl", b"ok", 1_000)
+    response = await http(server, "GET", "/files")
+    assert [f["path"] for f in response.json()] == ["real.stl"]
+    response = await http(server, "GET", "/files/link.rhai")
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_path"
 
 
-async def test_viewer_list_of_a_missing_output_dir_is_empty(fake: FakeScratchcad) -> None:
+async def test_files_of_a_missing_output_dir_is_empty(fake: FakeScratchcad) -> None:
     settings = Settings(url="http://scratchcad.test", output_dir=Path("/nonexistent/scratchcad"))
-    response = await http_get(create_server(settings, fake.transport()), "/viewer/files")
+    response = await http(create_server(settings, fake.transport()), "GET", "/files")
     assert response.status_code == 200
     assert response.json() == []
 
 
-async def test_viewer_serves_an_stl_file(server: FastMCP, settings: Settings) -> None:
-    write_stl(settings.output_dir / "parts" / "my bolt.stl", b"solid-bytes", 1_000)
-    response = await http_get(server, "/viewer/files/parts/my%20bolt.stl?v=1000")
-    assert response.status_code == 200
-    assert response.content == b"solid-bytes"
-    assert response.headers["content-type"] == "model/stl"
-    assert response.headers["cache-control"] == "no-cache"
+async def test_files_serves_scripts_and_meshes(server: FastMCP, settings: Settings) -> None:
+    write_file(settings.output_dir / "parts" / "my bolt.stl", b"solid-bytes", 1_000)
+    write_file(settings.output_dir / "bolt.rhai", SCRIPT.encode(), 1_000)
+    mesh = await http(server, "GET", "/files/parts/my%20bolt.stl")
+    assert mesh.status_code == 200
+    assert mesh.content == b"solid-bytes"
+    assert mesh.headers["content-type"] == "model/stl"
+    assert mesh.headers["cache-control"] == "no-cache"
+    script = await http(server, "GET", "/files/bolt.rhai")
+    assert script.text == SCRIPT
+    assert script.headers["content-type"] == "text/plain; charset=utf-8"
+    listed = (await http(server, "GET", "/files")).json()
+    assert script.headers["x-version"] == next(
+        f["version"] for f in listed if f["kind"] == "script"
+    )
 
 
 @pytest.mark.parametrize(
-    "path", ["missing.stl", "notes.txt", "folder.stl", "..%2Fescape.stl", "%2Fetc%2Fpasswd"]
+    ("path", "status"),
+    [
+        ("missing.stl", 404),
+        ("notes.txt", 400),
+        ("folder.stl", 400),
+        ("..%2Fescape.stl", 400),
+        ("%2Fetc%2Fpasswd", 400),
+    ],
 )
-async def test_viewer_refuses_anything_but_stl_files_inside_the_output_dir(
-    server: FastMCP, settings: Settings, path: str
+async def test_files_refuses_anything_but_parts_inside_the_output_dir(
+    server: FastMCP, settings: Settings, path: str, status: int
 ) -> None:
-    write_stl(settings.output_dir / "notes.txt", b"text", 1_000)
-    write_stl(settings.output_dir.parent / "escape.stl", b"outside", 1_000)
+    write_file(settings.output_dir / "notes.txt", b"text", 1_000)
+    write_file(settings.output_dir.parent / "escape.stl", b"outside", 1_000)
     (settings.output_dir / "folder.stl").mkdir()
-    response = await http_get(server, f"/viewer/files/{path}")
-    assert response.status_code == 404
+    response = await http(server, "GET", f"/files/{path}")
+    assert response.status_code == status
+    assert response.json()["error"]["message"]
+
+
+async def test_put_creates_and_replaces_files(server: FastMCP, settings: Settings) -> None:
+    created = await http(server, "PUT", "/files/new/part.rhai", content=SCRIPT.encode())
+    assert created.status_code == 200
+    body = created.json()
+    assert body["path"] == "new/part.rhai"
+    assert body["kind"] == "script"
+    assert body["bytes"] == len(SCRIPT)
+    assert (settings.output_dir / "new" / "part.rhai").read_text() == SCRIPT
+    mesh = await http(server, "PUT", "/files/part.stl", content=b"solid")
+    assert mesh.json()["kind"] == "mesh"
+    assert (settings.output_dir / "part.stl").read_bytes() == b"solid"
+    assert sorted(p.name for p in settings.output_dir.iterdir()) == ["new", "part.stl"]
+
+
+async def test_put_checks_the_expected_version(server: FastMCP, settings: Settings) -> None:
+    first = (await http(server, "PUT", "/files/a.rhai", content=b"one")).json()
+    os.utime(settings.output_dir / "a.rhai", (1_000, 1_000))
+    stale = await http(
+        server, "PUT", "/files/a.rhai", content=b"two",
+        headers={"x-expected-version": first["version"]},
+    )  # fmt: skip
+    assert stale.status_code == 409
+    error = stale.json()["error"]
+    assert error["code"] == "conflict"
+    assert "changed since it was read" in error["message"]
+    current = error["current"]
+    assert (settings.output_dir / "a.rhai").read_text() == "one"
+
+    ok = await http(
+        server, "PUT", "/files/a.rhai", content=b"two", headers={"x-expected-version": current}
+    )
+    assert ok.status_code == 200
+    assert (settings.output_dir / "a.rhai").read_text() == "two"
+
+    exists = await http(
+        server, "PUT", "/files/a.rhai", content=b"three", headers={"x-expected-version": "new"}
+    )
+    assert exists.status_code == 409
+    deleted = await http(
+        server, "PUT", "/files/gone.rhai", content=b"x", headers={"x-expected-version": current}
+    )
+    assert deleted.status_code == 409
+    assert "was deleted" in deleted.json()["error"]["message"]
+    assert deleted.json()["error"]["current"] is None
+    created = await http(
+        server, "PUT", "/files/gone.rhai", content=b"x", headers={"x-expected-version": "new"}
+    )
+    assert created.status_code == 200
+
+
+async def test_put_rejects_bad_uploads(
+    server: FastMCP, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bad_path = await http(server, "PUT", "/files/..%2Fx.rhai", content=b"x")
+    assert bad_path.status_code == 400
+    wrong_kind = await http(server, "PUT", "/files/x.txt", content=b"x")
+    assert wrong_kind.json()["error"]["code"] == "invalid_path"
+    not_text = await http(server, "PUT", "/files/x.rhai", content=b"\xff")
+    assert not_text.json()["error"]["code"] == "not_utf8"
+
+    monkeypatch.setattr(server_module, "MAX_SCRIPT_BYTES", 4)
+    too_big = await http(server, "PUT", "/files/x.rhai", content=b"12345")
+    assert too_big.status_code == 413
+    assert too_big.json()["error"]["code"] == "too_large"
+
+    async def chunks() -> Any:
+        yield b"123"
+        yield b"45"
+
+    streamed = await http(server, "PUT", "/files/x.rhai", content=chunks())
+    assert streamed.status_code == 413
+    assert list(settings.output_dir.iterdir()) == []
 
 
 def test_main_exits_cleanly_on_bad_config(monkeypatch: pytest.MonkeyPatch) -> None:
