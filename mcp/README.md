@@ -129,9 +129,10 @@ label, so the model can fix them. A parameter without a range gets one guessed
 from the value it was saved with, which stays fixed while you drag.
 
 The editor ([`web/`](web)) shows the part across two thirds of the window and
-its parameters as sliders in the other third. The file list and the script
-editor (with error markers) slide out on demand, so changing dimensions never
-needs the script. It exports STL files and opens `?open=<path>` links, and
+its parameters as sliders in the other third; the view follows the part as
+sliders change its size (Auto-fit). The file list slides out on demand, and the
+script editor (with error markers) takes the sliders' place when asked for, so
+changing dimensions never needs the script. It exports STL files and opens `?open=<path>` links, and
 talks only to this process:
 
 | route                         |                                                                                                                                                 |

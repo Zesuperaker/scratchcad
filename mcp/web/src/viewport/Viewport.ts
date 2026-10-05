@@ -12,6 +12,12 @@ import { toCreasedNormals } from "three/addons/utils/BufferGeometryUtils.js";
 // the faceting of meshed curved surfaces.
 const CREASE_ANGLE = THREE.MathUtils.degToRad(30);
 const TURN_MS = 300;
+const FLY_MS = 250;
+// Auto-fit reframes once the part's bounding sphere has grown, shrunk or
+// moved by more than this fraction of its radius since the last fit.
+const REFIT_TOLERANCE = 0.03;
+// Margin around the part when it's framed.
+const FRAME_MARGIN = 1.1;
 
 export interface MeshInfo {
   triangles: number;
@@ -24,6 +30,18 @@ interface Turn {
   rotation: THREE.Quaternion;
   began: number;
 }
+
+/** A glide of the orbit target and distance, keeping the viewing direction. */
+interface Fly {
+  fromTarget: THREE.Vector3;
+  toTarget: THREE.Vector3;
+  fromDistance: number;
+  toDistance: number;
+  began: number;
+}
+
+/** How show() treats the camera: frame a new file, or follow a changed part. */
+export type Framing = "reset" | "follow";
 
 export class Viewport {
   private readonly renderer: THREE.WebGLRenderer;
@@ -41,6 +59,10 @@ export class Viewport {
   private mesh: THREE.Mesh | null = null;
   private grid: THREE.GridHelper | null = null;
   private turn: Turn | null = null;
+  private fly: Fly | null = null;
+  private autoFit = true;
+  /** The bounding sphere the camera was last fitted to. */
+  private fitted: THREE.Sphere | null = null;
   private readonly canvas: HTMLCanvasElement;
 
   constructor(canvas: HTMLCanvasElement, cubeCanvas: HTMLCanvasElement) {
@@ -57,6 +79,8 @@ export class Viewport {
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
+    // Grabbing the view hands the camera back to the user mid-glide.
+    this.controls.addEventListener("start", () => (this.fly = null));
 
     this.cube = new ViewCube(cubeCanvas, (direction) => this.lookFrom(direction));
 
@@ -76,8 +100,12 @@ export class Viewport {
     this.cube.dispose();
   }
 
-  /** Shows an STL; `refit` moves the camera to frame it. */
-  show(stl: ArrayBuffer, refit: boolean): MeshInfo {
+  /**
+   * Shows an STL. "reset" frames it from the default three-quarter view (a
+   * newly opened file); "follow" keeps the user's view but, with auto-fit on,
+   * glides to fit the part when it has changed size or moved.
+   */
+  show(stl: ArrayBuffer, framing: Framing): MeshInfo {
     const geometry = toCreasedNormals(this.loader.parse(stl), CREASE_ANGLE);
     geometry.computeBoundingBox();
     this.clear();
@@ -94,7 +122,8 @@ export class Viewport {
     this.grid.position.set((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2);
     this.scene.add(this.grid);
 
-    if (refit) this.frame();
+    if (framing === "reset") this.frame();
+    else if (this.autoFit && this.outgrown()) this.fit(true);
     return {
       triangles: geometry.attributes.position!.count / 3,
       min: box.min.toArray(),
@@ -113,6 +142,12 @@ export class Viewport {
     this.grid = null;
   }
 
+  /** With auto-fit on, the camera follows the part as it changes. */
+  setAutoFit(on: boolean): void {
+    this.autoFit = on;
+    if (on && this.mesh) this.fit(true);
+  }
+
   setWireframe(on: boolean): void {
     this.material.wireframe = on;
   }
@@ -126,18 +161,75 @@ export class Viewport {
   /** Points the camera at the whole mesh from the default three-quarter view. */
   frame(): void {
     this.turn = null;
+    this.fly = null;
     if (!this.mesh) return;
-    const box = this.mesh.geometry.boundingBox!;
-    const center = box.getCenter(new THREE.Vector3());
-    const radius = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
-    const distance = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const sphere = this.sphere();
     const direction = new THREE.Vector3(0.6, 0.45, 1).normalize();
-    this.camera.position.copy(center).addScaledVector(direction, distance * 1.1);
+    const distance = this.distanceFor(sphere.radius);
+    this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
+    this.controls.target.copy(sphere.center);
+    this.setClipping(distance);
+    this.controls.update();
+    this.fitted = sphere;
+  }
+
+  /** Fits the camera to the mesh from the direction it's looking now. */
+  private fit(animate: boolean): void {
+    const sphere = this.sphere();
+    const toDistance = this.distanceFor(sphere.radius);
+    this.fitted = sphere;
+    this.setClipping(Math.max(toDistance, this.camera.position.distanceTo(this.controls.target)));
+    this.fly = {
+      fromTarget: this.controls.target.clone(),
+      toTarget: sphere.center.clone(),
+      fromDistance: this.camera.position.distanceTo(this.controls.target),
+      toDistance,
+      began: animate ? performance.now() : -Infinity,
+    };
+  }
+
+  /** Whether the part has changed enough since the last fit to fit it again. */
+  private outgrown(): boolean {
+    if (!this.fitted) return true;
+    const now = this.sphere();
+    const scale = Math.max(this.fitted.radius, 1e-9);
+    return (
+      Math.abs(now.radius - this.fitted.radius) / scale > REFIT_TOLERANCE ||
+      now.center.distanceTo(this.fitted.center) / scale > REFIT_TOLERANCE
+    );
+  }
+
+  private sphere(): THREE.Sphere {
+    const sphere = this.mesh!.geometry.boundingBox!.getBoundingSphere(new THREE.Sphere());
+    if (!(sphere.radius > 0)) sphere.radius = 1;
+    return sphere;
+  }
+
+  /** How far away a sphere of `radius` fits the view, whichever way it's narrower. */
+  private distanceFor(radius: number): number {
+    const vertical = THREE.MathUtils.degToRad(this.camera.fov);
+    const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * this.camera.aspect);
+    return (radius / Math.sin(Math.min(vertical, horizontal) / 2)) * FRAME_MARGIN;
+  }
+
+  private setClipping(distance: number): void {
     this.camera.near = distance / 100;
     this.camera.far = distance * 100;
     this.camera.updateProjectionMatrix();
-    this.controls.target.copy(center);
-    this.controls.update();
+  }
+
+  private stepFly(fly: Fly): void {
+    const t = Math.min((performance.now() - fly.began) / FLY_MS, 1);
+    const eased = t * (2 - t);
+    const direction = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.controls.target.lerpVectors(fly.fromTarget, fly.toTarget, eased);
+    const distance = THREE.MathUtils.lerp(fly.fromDistance, fly.toDistance, eased);
+    this.camera.position.copy(this.controls.target).addScaledVector(direction, distance);
+    this.camera.lookAt(this.controls.target);
+    if (t === 1) {
+      this.fly = null;
+      this.setClipping(fly.toDistance);
+    }
   }
 
   /** Swings the camera round the target to look from `direction`. */
@@ -180,8 +272,9 @@ export class Viewport {
   }
 
   private render(): void {
+    if (this.fly) this.stepFly(this.fly);
     if (this.turn) this.stepTurn(this.turn);
-    else this.controls.update();
+    if (!this.fly && !this.turn) this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.cube.render(this.camera.quaternion);
   }

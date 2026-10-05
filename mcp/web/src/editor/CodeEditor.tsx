@@ -16,6 +16,8 @@ interface Props {
   problems: Problem[];
   /** Moves the cursor to this spot and focuses the editor; a new `key` repeats it. */
   reveal?: { line: number; column: number; key: number } | null;
+  /** Whether the editor is on screen; it re-measures itself when shown. */
+  visible?: boolean;
 }
 
 const theme = EditorView.theme({
@@ -38,7 +40,14 @@ const theme = EditorView.theme({
  * `value` when it changes from outside (a parameter slider, a reload), by
  * applying only the changed span so the cursor and undo history survive.
  */
-export function CodeEditor({ docKey, value, onChange, problems, reveal = null }: Props) {
+export function CodeEditor({
+  docKey,
+  value,
+  onChange,
+  problems,
+  reveal = null,
+  visible = true,
+}: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -61,6 +70,9 @@ export function CodeEditor({ docKey, value, onChange, problems, reveal = null }:
         rhai,
         syntaxHighlighting(highlightStyle),
         lintGutter(),
+        // The script shares a narrow column with nothing else, so wrap
+        // rather than scroll sideways.
+        EditorView.lineWrapping,
         theme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) onChangeRef.current(update.state.doc.toString());
@@ -112,6 +124,10 @@ export function CodeEditor({ docKey, value, onChange, problems, reveal = null }:
       });
     editor.dispatch(setDiagnostics(editor.state, diagnostics));
   }, [problems, docKey]);
+
+  useEffect(() => {
+    if (visible) view.current?.requestMeasure();
+  }, [visible]);
 
   useEffect(() => {
     const editor = view.current;

@@ -39,9 +39,10 @@ export default function App() {
   const [text, setText] = useState("");
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
-  // At most one drawer is out: the file list (open until a file is picked)
-  // or the script editor.
-  const [drawer, setDrawer] = useState<"files" | "script" | null>("files");
+  // The file list slides out over the part; it's open until a file is picked.
+  const [drawer, setDrawer] = useState<"files" | null>("files");
+  // The right-hand panel shows the sliders, or the script in their place.
+  const [panel, setPanel] = useState<"sliders" | "script">("sliders");
   const [previewDepth, setPreviewDepth] = useState(7);
   const [exportDepth, setExportDepth] = useState(8);
   const [exporting, setExporting] = useState(false);
@@ -251,7 +252,8 @@ export default function App() {
       ? files?.find((f) => f.path === open.path.replace(/\.stl$/i, "") + ".rhai")
       : undefined;
   const closeDrawer = useCallback(() => setDrawer(null), []);
-  const toggle = (which: "files" | "script") => setDrawer((d) => (d === which ? null : which));
+  const showScript = (show: boolean) => setPanel(show ? "script" : "sliders");
+  const scriptShown = panel === "script" && open?.kind === "script";
   const button =
     "rounded-md border border-zinc-300 px-3 py-1 text-sm font-medium whitespace-nowrap " +
     "hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800";
@@ -267,7 +269,7 @@ export default function App() {
         <button
           type="button"
           aria-pressed={drawer === "files"}
-          onClick={() => toggle("files")}
+          onClick={() => setDrawer((d) => (d ? null : "files"))}
           className={`${button} ${pressed}`}
         >
           ☰ Files
@@ -280,11 +282,11 @@ export default function App() {
         <div className="ml-auto flex shrink-0 gap-1.5 sm:gap-2">
           <button
             type="button"
-            aria-pressed={drawer === "script"}
+            aria-pressed={scriptShown}
             disabled={open?.kind !== "script"}
-            onClick={() => toggle("script")}
+            onClick={() => showScript(!scriptShown)}
             className={`${button} ${pressed} relative`}
-            title="Show the script, to edit it by hand"
+            title={scriptShown ? "Back to the sliders" : "Show the script, to edit it by hand"}
           >
             {"</>"} Script
             {errors.length > 0 && (
@@ -379,38 +381,44 @@ export default function App() {
               onOpen={(file) => void openFile(file)}
             />
           </Drawer>
-
-          <Drawer
-            open={drawer === "script" && open?.kind === "script"}
-            onClose={closeDrawer}
-            title="Script"
-            width="w-[min(44rem,100%)]"
-          >
-            {open?.kind === "script" && (
-              <>
-                <div className="min-h-0 flex-1">
-                  <CodeEditor
-                    docKey={open.path}
-                    value={text}
-                    onChange={setText}
-                    problems={preview.problems}
-                    reveal={reveal}
-                  />
-                </div>
-                <ProblemsPanel
-                  problems={preview.problems}
-                  nodes={preview.nodes}
-                  computeMs={preview.computeMs}
-                  running={preview.running}
-                />
-              </>
-            )}
-          </Drawer>
         </main>
 
         <aside className="flex min-h-0 min-w-0 flex-col border-t border-zinc-200 bg-white lg:flex-1 lg:border-t-0 lg:border-l dark:border-zinc-800 dark:bg-zinc-900">
+          {open?.kind === "script" && (
+            // Kept mounted while the sliders show, so its undo history survives.
+            <div className={`min-h-0 flex-1 flex-col ${scriptShown ? "flex" : "hidden"}`}>
+              <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+                <h2 className="text-sm font-semibold">Script</h2>
+                <button
+                  type="button"
+                  onClick={() => showScript(false)}
+                  className="ml-auto text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  Back to the sliders
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                <CodeEditor
+                  docKey={open.path}
+                  value={text}
+                  onChange={setText}
+                  problems={preview.problems}
+                  reveal={reveal}
+                  visible={scriptShown}
+                />
+              </div>
+              <ProblemsPanel
+                problems={preview.problems}
+                nodes={preview.nodes}
+                computeMs={preview.computeMs}
+                running={preview.running}
+              />
+            </div>
+          )}
           {open?.kind === "script" ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <div
+              className={`min-h-0 flex-1 flex-col overflow-y-auto ${scriptShown ? "hidden" : "flex"}`}
+            >
               {errors.length > 0 && (
                 <div
                   role="alert"
@@ -421,7 +429,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setDrawer("script");
+                      showScript(true);
                       const { line, column } = errors[0]!;
                       if (line !== undefined)
                         setReveal({ line, column: column ?? 1, key: Date.now() });

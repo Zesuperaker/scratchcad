@@ -67,11 +67,13 @@ The agent delivers a part as a Rhai script, saved to `./output` with the
 <http://localhost:8000>:
 
 - the part fills most of the window, with sliders for its dimensions beside
-  it; moving one re-meshes the part a moment later
+  it; moving one re-meshes the part a moment later, and the view follows the
+  part as it grows or shrinks (**Auto-fit**, on by default)
 - **Files** slides out a list of scripts and exported meshes, and tucks itself
   away once you pick one
-- **Script** slides out the Rhai source, for editing by hand, with errors
-  marked on their line; you never need it to change the part's dimensions
+- **Script** swaps the sliders for the Rhai source, for editing by hand, with
+  errors marked on their line; you never need it to change the part's
+  dimensions
 - **Export STL** meshes the script and writes an `.stl` next to it, at the
   detail chosen under **Region & detail**
 

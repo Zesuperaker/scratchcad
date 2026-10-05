@@ -21,6 +21,7 @@ export function ViewportView({ stl, fitKey, stale, busy, info, onInfo, onError }
   const viewport = useRef<Viewport | null>(null);
   const fitted = useRef<string | null>(null);
   const [wireframe, setWireframe] = useState(false);
+  const [autoFit, setAutoFit] = useState(true);
   const onErrorRef = useRef(onError);
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export function ViewportView({ stl, fitKey, stale, busy, info, onInfo, onError }
     let next: MeshInfo | null = null;
     if (stl) {
       try {
-        next = view.show(stl, fitted.current !== fitKey);
+        next = view.show(stl, fitted.current !== fitKey ? "reset" : "follow");
         fitted.current = fitKey;
       } catch (e) {
         onErrorRef.current(
@@ -61,6 +62,7 @@ export function ViewportView({ stl, fitKey, stale, busy, info, onInfo, onError }
 
   useEffect(() => viewport.current?.setStale(stale), [stale]);
   useEffect(() => viewport.current?.setWireframe(wireframe), [wireframe]);
+  useEffect(() => viewport.current?.setAutoFit(autoFit), [autoFit]);
 
   const size = info && info.max.map((hi, i) => fmt(hi - info.min[i]!)).join(" × ");
   const button =
@@ -76,6 +78,15 @@ export function ViewportView({ stl, fitKey, stale, busy, info, onInfo, onError }
         className="absolute top-2 right-2 h-[120px] w-[120px]"
       />
       <div className="absolute right-3 bottom-3 flex gap-2">
+        <button
+          type="button"
+          aria-pressed={autoFit}
+          onClick={() => setAutoFit((a) => !a)}
+          title="Keep the whole part in view as it changes"
+          className={`${button} ${autoFit ? "border-blue-500 text-blue-600 dark:text-blue-400" : ""}`}
+        >
+          Auto-fit
+        </button>
         <button
           type="button"
           aria-pressed={wireframe}
