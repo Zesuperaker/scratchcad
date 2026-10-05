@@ -1,0 +1,17 @@
+{
+  // The MCP server and the editor's backend. Node runs these .ts files as
+  // they are in development (type stripping); `npm run build` compiles them
+  // to dist/server for `npm start`.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist/server",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"]
+}

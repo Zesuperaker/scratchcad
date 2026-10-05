@@ -8,15 +8,15 @@ over stdio by default, or over streamable HTTP in the dev container.
 
 ## Tools
 
-| tool | endpoint | what the model uses it for |
-|---|---|---|
-| `validate_script` | `POST /v1/scripts/validate` | Catch Rhai errors (with line and column) before rendering |
-| `render_3d` | `POST /v1/raster/3d` | See the part: returns a shaded PNG as MCP image content |
-| `render_2d` | `POST /v1/raster/2d` | See inside the part: the cross-section at z = 0 |
-| `evaluate` | `POST /v1/eval` | Measure exactly: field values, gradients or interval bounds |
-| `save_script` | `POST /v1/scripts/validate` | Deliver the part: check the script and save it as `.rhai`, recording its region |
-| `read_script` | — | Read a saved script back, including the user's edits from the editor |
-| `export_stl` | `POST /v1/export/stl` | Write a mesh to a `.stl` file, when the user asks for one |
+| tool              | endpoint                    | what the model uses it for                                                      |
+| ----------------- | --------------------------- | ------------------------------------------------------------------------------- |
+| `validate_script` | `POST /v1/scripts/validate` | Catch Rhai errors (with line and column) before rendering                       |
+| `render_3d`       | `POST /v1/raster/3d`        | See the part: returns a shaded PNG as MCP image content                         |
+| `render_2d`       | `POST /v1/raster/2d`        | See inside the part: the cross-section at z = 0                                 |
+| `evaluate`        | `POST /v1/eval`             | Measure exactly: field values, gradients or interval bounds                     |
+| `save_script`     | `POST /v1/scripts/validate` | Deliver the part: check the script and save it as `.rhai`, recording its region |
+| `read_script`     | —                           | Read a saved script back, including the user's edits from the editor            |
+| `export_stl`      | `POST /v1/export/stl`       | Write a mesh to a `.stl` file, when the user asks for one                       |
 
 The server's MCP `instructions` carry a scripting guide: the shape
 constructors, how `draw` works, the units, and how to size the view region
@@ -53,16 +53,16 @@ claude mcp add scratchcad -- uv run --project "$PWD/mcp" scratchcad-mcp
 
 ## Configuration
 
-| env | default | |
-|---|---|---|
-| `SCRATCHCAD_URL` | `http://127.0.0.1:8080` | where scratchcad is listening |
-| `SCRATCHCAD_API_TOKEN` | unset | bearer token, if scratchcad was started with one |
-| `SCRATCHCAD_MCP_TIMEOUT_S` | `60` | HTTP timeout per request |
-| `SCRATCHCAD_MCP_OUTPUT_DIR` | the working directory | where `save_script` and `export_stl` write files |
-| `SCRATCHCAD_MCP_TRANSPORT` | `stdio` | `stdio`, or `http` for streamable HTTP at `/mcp` |
-| `SCRATCHCAD_MCP_HOST` | `127.0.0.1` | HTTP bind address |
-| `SCRATCHCAD_MCP_PORT` | `8000` | HTTP port |
-| `SCRATCHCAD_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1` | `Host` headers accepted in HTTP mode |
+| env                            | default                 |                                                  |
+| ------------------------------ | ----------------------- | ------------------------------------------------ |
+| `SCRATCHCAD_URL`               | `http://127.0.0.1:8080` | where scratchcad is listening                    |
+| `SCRATCHCAD_API_TOKEN`         | unset                   | bearer token, if scratchcad was started with one |
+| `SCRATCHCAD_MCP_TIMEOUT_S`     | `60`                    | HTTP timeout per request                         |
+| `SCRATCHCAD_MCP_OUTPUT_DIR`    | the working directory   | where `save_script` and `export_stl` write files |
+| `SCRATCHCAD_MCP_TRANSPORT`     | `stdio`                 | `stdio`, or `http` for streamable HTTP at `/mcp` |
+| `SCRATCHCAD_MCP_HOST`          | `127.0.0.1`             | HTTP bind address                                |
+| `SCRATCHCAD_MCP_PORT`          | `8000`                  | HTTP port                                        |
+| `SCRATCHCAD_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1`   | `Host` headers accepted in HTTP mode             |
 
 In HTTP mode, `Host` and `Origin` checking (DNS-rebinding protection) is
 always on, including when bound to `0.0.0.0` as in the container. FastMCP
@@ -86,10 +86,10 @@ the model to put editable dimensions in top-level lines like
 In HTTP mode the server serves the output directory to the
 [editor](../viewer), with the same path rules as the tools:
 
-| route | |
-|---|---|
-| `GET /files` | The `.rhai` and `.stl` files, newest first, each with a `version` (hidden directories are skipped) |
-| `GET /files/<path>` | One file, with its version in the `x-version` header |
+| route               |                                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /files`        | The `.rhai` and `.stl` files, newest first, each with a `version` (hidden directories are skipped)                                               |
+| `GET /files/<path>` | One file, with its version in the `x-version` header                                                                                             |
 | `PUT /files/<path>` | Write a file atomically. With `x-expected-version: <version>` the write is refused with 409 if the file changed since; with `new`, if it exists. |
 
 Anything that isn't a `.rhai` or `.stl` file inside the output directory,
@@ -107,6 +107,7 @@ uv run pytest --cov            # CI requires 100% line and branch coverage
 The same checks run in the dev container: `docker compose run --rm mcp uv run pytest`.
 
 The tests cover three layers:
+
 - `test_config.py` and `test_client.py`: settings parsing, and the HTTP client
   against a mock transport, including every error path
 - `test_server.py`: each tool through a real in-memory MCP client session,
