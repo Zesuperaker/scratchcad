@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { parseParams } from "./params";
+import { parseParams } from "../../../src/shared/params.ts";
 import { parseRegion } from "../../../src/shared/region.ts";
 import { NEW_SCRIPT } from "./template";
 

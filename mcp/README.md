@@ -111,18 +111,28 @@ anyone else) can mesh it without guessing:
 
 ```rhai
 // region: center=[0, 0, 0] half_size=30
+// # Body
 let width = 20.0; // [5, 50] Width (mm)
+let holes = 4; // [1, 12] Number of holes
 ```
 
 `save_script` writes that line from its `center` and `half_size` arguments,
-keeping the script's existing one when they are left out. The guide asks the
-model to put editable dimensions in top-level `let` lines with an optional
-`[min, max]` range and label; the editor shows them as sliders and rewrites only
-the number, keeping integers as integers.
+keeping the script's existing one when they are left out.
 
-The editor ([`web/`](web)) edits scripts with live preview and error markers,
-exports STL files, and opens `?open=<path>` links. It talks only to this
-process:
+The other lines above are parameters: top-level `let` lines assigning a number,
+with a `[min, max]` range and a plain-language label (with its unit) in a
+trailing comment, grouped under `// # Section` lines. The editor shows each as a
+labelled slider and rewrites only the number, keeping integers as integers. The
+guide tells the model how to choose and name them, and `save_script` returns
+the sliders it found (`parameters`) with `notes` on any that lack a range or
+label, so the model can fix them. A parameter without a range gets one guessed
+from the value it was saved with, which stays fixed while you drag.
+
+The editor ([`web/`](web)) shows the part across two thirds of the window and
+its parameters as sliders in the other third. The file list and the script
+editor (with error markers) slide out on demand, so changing dimensions never
+needs the script. It exports STL files and opens `?open=<path>` links, and
+talks only to this process:
 
 | route                         |                                                                                                                                                 |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -5,6 +5,7 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { type BinaryResult, type Body, ScratchcadClient, ScratchcadError } from "./client.ts";
 import { GUIDE } from "./guide.ts";
+import { checkParams, parseParams } from "./shared/params.ts";
 import * as workspace from "./workspace.ts";
 import { MESH, SCRIPT, WorkspaceError } from "./workspace.ts";
 
@@ -63,6 +64,23 @@ const savedScript = z.object({
     .string()
     .nullable()
     .describe("Link that opens the script in the editor; null when the editor is not running."),
+  parameters: z
+    .array(
+      z.object({
+        name: z.string(),
+        label: z.string(),
+        section: z.string(),
+        value: z.number(),
+        min: z.number(),
+        max: z.number(),
+      }),
+    )
+    .describe("The sliders the editor shows for this script, in order."),
+  notes: z
+    .array(z.string())
+    .describe(
+      "Problems with the parameters that make the sliders hard to use. Fix them and save again.",
+    ),
 });
 
 const scriptFile = z.object({
@@ -295,7 +313,8 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
       description:
         "Check the script and save it as a .rhai file the user can open in the editor.\n\nThis " +
         "is how a finished part is delivered. The first line of the file records the region " +
-        "(center and half_size) the editor meshes.",
+        "(center and half_size) the editor meshes. The result lists the sliders the user will " +
+        "see and notes on any that are unclear; fix those and save again (overwrite=true).",
       inputSchema: z.strictObject({
         script,
         path: z
@@ -333,6 +352,7 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
         } satisfies workspace.Region;
         const checked = await client.validate({ script: args.script });
         const text = workspace.withRegion(args.script, region);
+        const params = parseParams(text);
         workspace.write(target, text);
         const relative = workspace.entry(outputDir, target).path;
         return structured({
@@ -342,6 +362,15 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
           center: region.center,
           half_size: region.halfSize,
           editor_url: editorUrl && `${editorUrl}?open=${encodeURIComponent(relative)}`,
+          parameters: params.map(({ name, label, section, value, min, max }) => ({
+            name,
+            label,
+            section,
+            value,
+            min,
+            max,
+          })),
+          notes: checkParams(params),
         });
       }),
   );

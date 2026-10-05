@@ -14,6 +14,8 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   problems: Problem[];
+  /** Moves the cursor to this spot and focuses the editor; a new `key` repeats it. */
+  reveal?: { line: number; column: number; key: number } | null;
 }
 
 const theme = EditorView.theme({
@@ -36,7 +38,7 @@ const theme = EditorView.theme({
  * `value` when it changes from outside (a parameter slider, a reload), by
  * applying only the changed span so the cursor and undo history survive.
  */
-export function CodeEditor({ docKey, value, onChange, problems }: Props) {
+export function CodeEditor({ docKey, value, onChange, problems, reveal = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -110,6 +112,14 @@ export function CodeEditor({ docKey, value, onChange, problems }: Props) {
       });
     editor.dispatch(setDiagnostics(editor.state, diagnostics));
   }, [problems, docKey]);
+
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor || !reveal) return;
+    const at = offsetOf(editor.state.doc.toString(), reveal.line, reveal.column);
+    editor.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+    editor.focus();
+  }, [reveal]);
 
   return <div ref={host} className="h-full min-h-0 overflow-hidden" />;
 }

@@ -66,11 +66,19 @@ The agent delivers a part as a Rhai script, saved to `./output` with the
 `save_script` tool, which also gives the agent a link to it in the editor at
 <http://localhost:8000>:
 
-- the part is meshed and shown as you type, with errors marked in the script
-- the dimensions the agent put in `let` lines at the top of the script appear
-  as sliders under **Parameters**
+- the part fills most of the window, with sliders for its dimensions beside
+  it; moving one re-meshes the part a moment later
+- **Files** slides out a list of scripts and exported meshes, and tucks itself
+  away once you pick one
+- **Script** slides out the Rhai source, for editing by hand, with errors
+  marked on their line; you never need it to change the part's dimensions
 - **Export STL** meshes the script and writes an `.stl` next to it, at the
-  detail chosen under **Region & export**
+  detail chosen under **Region & detail**
+
+The sliders come from the script's top-level `let` lines, which the agent is
+told to write with a plain-language label, a unit and a range, for example
+`let thread_length = 26.0; // [10, 60] Thread length (mm)`. `save_script` tells
+the agent which sliders it made and which are unclear, so it can fix them.
 
 The agent only exports an STL itself when you ask it to. If you edit a script
 and then ask the agent for changes, it reads your version first; if it

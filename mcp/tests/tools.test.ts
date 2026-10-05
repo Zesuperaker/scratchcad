@@ -62,6 +62,9 @@ describe("discovery", () => {
       "editor_url",
       "call export_stl when the user asks",
       "// [10, 60]",
+      "Label (unit)",
+      "// # Head",
+      "integer division truncates",
     ]) {
       expect(GUIDE).toContain(needle);
     }
@@ -451,9 +454,30 @@ describe("save_script and read_script", () => {
       center: [1, 2, 3],
       half_size: 2.5,
       editor_url: "http://localhost:8000/?open=parts%2Fmy%20ball.rhai",
+      parameters: [],
+      notes: [expect.stringContaining("no parameters, so the user gets no sliders")],
     });
     expect(fake.last.url.pathname).toBe("/v1/scripts/validate");
     expect(fake.last.body).toEqual({ script: SCRIPT });
+  });
+
+  it("lists the sliders the script makes, and what's unclear about them", async () => {
+    const { client } = await setup();
+    const script = [
+      "// # Body",
+      "let width = 20.0; // [5, 50] Width (mm)",
+      "let depth = 8.0;",
+      SCRIPT,
+    ].join("\n");
+    const result = await call(client, "save_script", { script, path: "a.rhai" });
+    expect(result.structuredContent!.parameters).toEqual([
+      { name: "width", label: "Width (mm)", section: "Body", value: 20, min: 5, max: 50 },
+      { name: "depth", label: "Depth", section: "Body", value: 8, min: 0, max: 16 },
+    ]);
+    expect(result.structuredContent!.notes).toEqual([
+      "depth has no [min, max] range, so its slider guesses 0 to twice the value",
+      'depth has no label: add one after the range, with units, e.g. "Width (mm)"',
+    ]);
   });
 
   it("has no editor link when the editor is off", async () => {

@@ -5,7 +5,6 @@ interface Props {
   error: string | null;
   openPath: string | null;
   onOpen: (file: FileEntry) => void;
-  onNew: () => void;
 }
 
 function ago(seconds: number): string {
@@ -26,7 +25,7 @@ function Section({
   title,
   files,
   ...props
-}: Omit<Props, "files" | "error" | "onNew"> & {
+}: Omit<Props, "files" | "error"> & {
   title: string;
   files: FileEntry[];
 }) {
@@ -59,43 +58,31 @@ function Section({
   );
 }
 
-export function FileList({ files, error, openPath, onOpen, onNew }: Props) {
+export function FileList({ files, error, openPath, onOpen }: Props) {
   return (
-    <aside className="flex min-h-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-        <span className="text-sm font-semibold">Files</span>
-        <button
-          type="button"
-          onClick={onNew}
-          className="rounded-md bg-blue-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-700"
-        >
-          New script
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto pb-3">
-        {error && (
-          <p className="m-3 rounded-md bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
-            Can't reach the MCP server's file API: {error}
-          </p>
-        )}
-        {files === null && !error && <p className="p-3 text-xs text-zinc-500">Loading…</p>}
-        {files && (
-          <>
-            <Section
-              title="Scripts"
-              files={files.filter((f) => f.kind === "script")}
-              openPath={openPath}
-              onOpen={onOpen}
-            />
-            <Section
-              title="Meshes"
-              files={files.filter((f) => f.kind === "mesh")}
-              openPath={openPath}
-              onOpen={onOpen}
-            />
-          </>
-        )}
-      </div>
-    </aside>
+    <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+      {error && (
+        <p className="m-3 rounded-md bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+          Can't reach the file API: {error}
+        </p>
+      )}
+      {files === null && !error && <p className="p-3 text-xs text-zinc-500">Loading…</p>}
+      {files && (
+        <>
+          <Section
+            title="Scripts"
+            files={files.filter((f) => f.kind === "script")}
+            openPath={openPath}
+            onOpen={onOpen}
+          />
+          <Section
+            title="Meshes"
+            files={files.filter((f) => f.kind === "mesh")}
+            openPath={openPath}
+            onOpen={onOpen}
+          />
+        </>
+      )}
+    </div>
   );
 }
