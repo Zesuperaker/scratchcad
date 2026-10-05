@@ -1,5 +1,5 @@
-// The scratchcad service, reached through the dev server's /api/scratchcad
-// proxy (which adds the API token, if there is one).
+// The scratchcad service, reached through scratchcad-mcp's /api/scratchcad
+// proxy, which adds the API token (if there is one) so the page never sees it.
 import type { Vec3 } from "../../../src/shared/region.ts";
 import { errorFrom } from "./errors";
 

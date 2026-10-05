@@ -4,8 +4,8 @@
 > scratchcad is under active development. APIs, tools and script syntax may
 > change without notice, and things may break between commits.
 
-scratchcad is a rust based solid modelling API, plus an MCP server so AI assistants
-can use it.
+scratchcad is a rust based solid modelling API, plus a local MCP server and
+editor so AI assistants (and you) can use it.
 
 ## Quick start (requires docker)
 
@@ -20,13 +20,13 @@ cd scratchcad
 ```
 <!-- x-release-please-end -->
 
-Then start the server, the MCP server and the editor:
+Then start the server, and the MCP server with the editor:
 
 ```sh
 docker compose up --build        # or `docker compose watch` to reload on edits
 ```
 
-Open the editor at <http://localhost:5173>.
+Open the editor at <http://localhost:8000>.
 
 The mcp is already configured localy through .mcp.json
 
@@ -43,29 +43,28 @@ streamable HTTP transport.
 
 ## Docker info
 
-`compose.yaml` runs three dev images:
+`compose.yaml` runs two dev images:
 
 | service | port | image |
 |---|---|---|
 | `server` | `127.0.0.1:8080` | [`server/Dockerfile.dev`](server/Dockerfile.dev): `cargo run` with fast incremental rebuilds |
-| `mcp` | `127.0.0.1:8000` | [`mcp/Dockerfile.dev`](mcp/Dockerfile.dev): the MCP server over streamable HTTP at `/mcp` |
-| `viewer` | `127.0.0.1:5173` | [`viewer/Dockerfile.dev`](viewer/Dockerfile.dev): the editor's Vite dev server, with hot reload |
+| `mcp` | `127.0.0.1:8000` | [`mcp/Dockerfile.dev`](mcp/Dockerfile.dev): the MCP server over streamable HTTP at `/mcp`, and the editor at `/` |
 
-Run the MCP checks inside its container with
-`docker compose run --rm mcp uv run pytest`, and the editor's with
-`docker compose run --rm viewer npm test`.
+Run the MCP server's and editor's checks inside its container with
+`docker compose run --rm mcp npm test`.
 
-With `docker compose watch`, edits
-under `server/src` or `mcp/src` restart the affected container (the Rust
-side recompiles in a few seconds), edits under `viewer/src` hot-reload in the
-browser, and changes to `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
-`uv.lock`, `package.json` or `package-lock.json` rebuild its image. To require an API token, put
+With `docker compose watch`, edits under `server/src` restart the server (the
+Rust side recompiles in a few seconds), edits under `mcp/src` restart the MCP
+server, edits under `mcp/web` hot-reload in the browser, and changes to
+`Cargo.toml`, `Cargo.lock`, `package.json` or `package-lock.json` rebuild that
+image. To require an API token, put
 `SCRATCHCAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
 
 ## Scripts, the editor and STL files
 
 The agent delivers a part as a Rhai script, saved to `./output` with the
-`save_script` tool. Open it in the editor at <http://localhost:5173>:
+`save_script` tool, which also gives the agent a link to it in the editor at
+<http://localhost:8000>:
 
 - the part is meshed and shown as you type, with errors marked in the script
 - the dimensions the agent put in `let` lines at the top of the script appear
@@ -78,17 +77,18 @@ and then ask the agent for changes, it reads your version first; if it
 changes a script while you have unsaved edits, the editor asks which version
 to keep.
 
-## Architecture 
+## Architecture
 
-| directory | what it is |
-|---|---|
-| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. |
-| [`mcp/`](mcp) | An [MCP](https://modelcontextprotocol.io) server (Python 3.14, [FastMCP](https://gofastmcp.com)) that exposes the service's endpoints as tools, so a model can write a script, look at renders, measure the part and save the script (or export an STL). It also serves the output directory to the editor. |
-| [`viewer/`](viewer) | The editor (TypeScript, [React](https://react.dev), [Vite](https://vite.dev), [Tailwind](https://tailwindcss.com), [CodeMirror](https://codemirror.net), [three.js](https://threejs.org)): edit scripts with a live 3D preview and parameter sliders, and export STL files. |
+| directory | what it is | where it runs |
+|---|---|---|
+| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. It is stateless and never touches your files. | anywhere: locally in Docker, or on another machine |
+| [`mcp/`](mcp) | The MCP server and editor (TypeScript, [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [React](https://react.dev), [Vite](https://vite.dev), [CodeMirror](https://codemirror.net), [three.js](https://threejs.org)). Gives a model tools to write a script, look at renders, measure the part and save it, and gives you an editor with a live 3D preview, parameter sliders and STL export. | always on your machine, next to the files it reads and writes |
 
-The three are independent: the MCP server talks to the service over HTTP, so
-it works with a local build, the dev containers, or a deployed instance. The
-editor's dev server proxies to both, so the browser only talks to one origin.
+The two talk over HTTP: the MCP server reaches scratchcad at `SCRATCHCAD_URL`,
+so it works with a local build, the dev container, or a deployed instance
+(see [`mcp/README.md`](mcp/README.md) for running it on its own). The editor
+only talks to the MCP server, which forwards its requests to scratchcad and
+adds the API token, so the token never reaches the browser.
 
 ## License
 

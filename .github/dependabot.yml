@@ -12,20 +12,8 @@ updates:
       cargo-minor-patch:
         update-types: [minor, patch]
 
-  - package-ecosystem: uv
-    directory: /mcp
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: fix
-      prefix-development: chore
-      include: scope
-    groups:
-      uv-minor-patch:
-        update-types: [minor, patch]
-
   - package-ecosystem: npm
-    directory: /viewer
+    directory: /mcp
     schedule:
       interval: weekly
     commit-message:
@@ -48,7 +36,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker
-    directories: [/server, /mcp, /viewer]
+    directories: [/server, /mcp]
     schedule:
       interval: weekly
     commit-message:

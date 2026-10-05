@@ -1,9 +1,4 @@
-.venv
-**/__pycache__
-.coverage
-.coverage.*
-htmlcov
-.pytest_cache
-.mypy_cache
-.ruff_cache
-Dockerfile.dev
+node_modules
+dist
+coverage
+.env

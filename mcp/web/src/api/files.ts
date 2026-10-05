@@ -1,5 +1,5 @@
-// The MCP server's file API for the output directory, reached through the
-// dev server's /api/files proxy.
+// The file API for the output directory, served by the same local process
+// (scratchcad-mcp) that serves this page.
 import { errorFrom } from "./errors";
 
 const BASE = "/api/files";

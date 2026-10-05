@@ -1,6 +1,6 @@
 {
   "name": "scratchcad-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Local MCP server and editor for scratchcad: tools for AI assistants, a browser editor for Rhai scripts, and the output directory they share",
   "license": "Apache-2.0",

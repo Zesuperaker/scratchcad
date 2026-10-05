@@ -23,7 +23,7 @@ target
 # Coverage profiles
 *.profraw
 
-# Python (mcp/)
+# Python (scripts/)
 __pycache__/
 *.py[cod]
 .venv/

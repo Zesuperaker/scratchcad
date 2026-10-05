@@ -1,35 +1,27 @@
 # syntax=docker/dockerfile:1
 #
-# Development image for the MCP server; see ../compose.yaml. It runs the
-# server over streamable HTTP (MCP clients on the host cannot reach a
-# container's stdio) and includes the dev tools, so the checks run in it too:
-#   docker compose run --rm mcp uv run pytest
+# Development image for the MCP server and editor; see ../compose.yaml. It
+# runs `npm run dev`: MCP over streamable HTTP at /mcp (MCP clients on the
+# host cannot reach a container's stdio) and the editor at /, with Node
+# restarting on server changes and Vite hot-reloading the editor. The checks
+# run in it too:
+#   docker compose run --rm mcp npm test
 
-FROM python:3.14-slim-trixie
-
-RUN pip install --no-cache-dir uv==0.12.18
+FROM node:24-slim
 
 WORKDIR /app
-# The virtualenv lives outside /app so syncing sources never clobbers it.
-ENV UV_PROJECT_ENVIRONMENT=/venv \
-    UV_LINK_MODE=copy \
-    UV_COMPILE_BYTECODE=1 \
-    UV_PYTHON_DOWNLOADS=never \
-    PATH=/venv/bin:$PATH \
-    SCRATCHCAD_MCP_TRANSPORT=http \
+ENV SCRATCHCAD_MCP_TRANSPORT=http \
     SCRATCHCAD_MCP_HOST=0.0.0.0 \
     SCRATCHCAD_MCP_PORT=8000 \
     SCRATCHCAD_MCP_OUTPUT_DIR=/output
 
 # Install dependencies first so they are cached independently of our sources.
-COPY pyproject.toml uv.lock .python-version README.md ./
-RUN uv sync --locked --no-install-project
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
-COPY src ./src
-COPY tests ./tests
-RUN uv sync --locked
+COPY . .
 
 EXPOSE 8000
-HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=5 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
-CMD ["scratchcad-mcp"]
+HEALTHCHECK --interval=5s --timeout=3s --start-period=20s --retries=5 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8000/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+CMD ["npm", "run", "dev"]
