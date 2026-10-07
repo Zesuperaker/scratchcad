@@ -28,8 +28,9 @@ const unused = () => {
 
 const port = (r: Running) => (r.http!.address() as AddressInfo).port;
 
-async function takenPort(): Promise<number> {
-  const blocker = http.createServer();
+/** A port held by something else: by default a server that never answers. */
+async function takenPort(handler?: http.RequestListener): Promise<number> {
+  const blocker = http.createServer(handler);
   blockers.push(blocker);
   await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
   return (blocker.address() as AddressInfo).port;
@@ -78,25 +79,70 @@ describe("start", () => {
     ]);
   });
 
-  it("serves the editor in stdio mode too, or leaves it to whoever has the port", async () => {
+  it("warns when the API token would go out over plain HTTP", async () => {
     const [serverSide] = InMemoryTransport.createLinkedPair();
-    const withEditor = await launch(testSettings({ editor: true }), {
+    const log: string[] = [];
+    await launch(testSettings({ url: "http://cad.example.com", apiToken: "s3cret" }), {
+      log: (l) => log.push(l),
+      stdioTransport: () => serverSide,
+    });
+    expect(log.some((l) => l.includes("SCRATCHCAD_API_TOKEN is sent unencrypted"))).toBe(true);
+  });
+
+  it("serves the editor in stdio mode too, or shares one for the same files", async () => {
+    const [serverSide] = InMemoryTransport.createLinkedPair();
+    const settings = testSettings({ editor: true });
+    const withEditor = await launch(settings, {
       log: () => {},
       stdioTransport: () => serverSide,
     });
     expect(withEditor.http).not.toBeNull();
     expect(withEditor.editorUrl).toBe(`http://localhost:${port(withEditor)}/`);
 
-    const taken = await takenPort();
     const log: string[] = [];
     const [other] = InMemoryTransport.createLinkedPair();
-    const r = await launch(testSettings({ editor: true, port: taken }), {
-      log: (l) => log.push(l),
+    const r = await launch(
+      { ...settings, port: port(withEditor) },
+      { log: (l) => log.push(l), stdioTransport: () => other },
+    );
+    expect(r.http).toBeNull();
+    expect(r.editorUrl).toBe(withEditor.editorUrl);
+    expect(log[0]).toContain(`port ${port(withEditor)} is in use`);
+    expect(log[0]).toContain("for the same output directory");
+  });
+
+  it("gives no editor link when the port holder shows other files", async () => {
+    const [serverSide] = InMemoryTransport.createLinkedPair();
+    const first = await launch(testSettings({ editor: true }), {
+      log: () => {},
+      stdioTransport: () => serverSide,
+    });
+    const [other] = InMemoryTransport.createLinkedPair();
+    const elsewhere = await launch(testSettings({ editor: true, port: port(first) }), {
+      log: () => {},
       stdioTransport: () => other,
     });
+    expect(elsewhere.http).toBeNull();
+    expect(elsewhere.editorUrl).toBeNull();
+
+    const taken = await takenPort();
+    const log: string[] = [];
+    const [third] = InMemoryTransport.createLinkedPair();
+    const r = await launch(testSettings({ editor: true, port: taken }), {
+      log: (l) => log.push(l),
+      stdioTransport: () => third,
+    });
     expect(r.http).toBeNull();
-    expect(r.editorUrl).toBe(`http://localhost:${taken}/`);
-    expect(log[0]).toContain(`port ${taken} is in use`);
+    expect(r.editorUrl).toBeNull();
+    expect(log[0]).toContain("saved scripts get no editor link");
+
+    const unrelated = await takenPort((_req, res) => res.writeHead(404).end());
+    const [fourth] = InMemoryTransport.createLinkedPair();
+    const s = await launch(testSettings({ editor: true, port: unrelated }), {
+      log: () => {},
+      stdioTransport: () => fourth,
+    });
+    expect(s.editorUrl).toBeNull();
   });
 
   it("fails over HTTP when the port is taken", async () => {

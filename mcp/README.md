@@ -59,7 +59,8 @@ SCRATCHCAD_MCP_TRANSPORT=http SCRATCHCAD_MCP_OUTPUT_DIR=~/parts npm start
 
 Or let the MCP client start it over stdio. It then also serves the editor on
 `SCRATCHCAD_MCP_PORT`; if another scratchcad-mcp already has that port (another
-session, say), it leaves the editor to that one.
+session, say), it leaves the editor to that one, and links to it only if it
+shows the same output directory.
 
 **Claude Code** (from the repo root, after `npm run build` in `mcp/`):
 

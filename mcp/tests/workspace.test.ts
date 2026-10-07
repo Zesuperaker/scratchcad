@@ -69,6 +69,15 @@ describe("listFiles", () => {
     ]);
   });
 
+  it("skips dependency and build trees, and very deep directories", () => {
+    const out = tempDir();
+    writeFile(path.join(out, "node_modules/pkg/a.rhai"), "x", 1000);
+    writeFile(path.join(out, "target/debug/b.stl"), "x", 1000);
+    writeFile(path.join(out, "1/2/3/4/5/6/7/8/deepest.rhai"), "x", 1000);
+    writeFile(path.join(out, "1/2/3/4/5/6/7/8/9/too-deep.rhai"), "x", 1000);
+    expect(workspace.listFiles(out).map((e) => e.path)).toEqual(["1/2/3/4/5/6/7/8/deepest.rhai"]);
+  });
+
   it("is empty for a missing directory", () => {
     expect(workspace.listFiles(path.join(tempDir(), "nope"))).toEqual([]);
   });

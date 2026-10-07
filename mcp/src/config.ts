@@ -101,3 +101,19 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Settings 
     editor: editor === "on",
   };
 }
+
+/**
+ * Whether the API token would cross the network unencrypted: it is set and
+ * SCRATCHCAD_URL is plain http:// to a host other than this machine.
+ */
+export function sendsTokenInCleartext({
+  url,
+  apiToken,
+}: Pick<Settings, "url" | "apiToken">): boolean {
+  if (!apiToken || !URL.canParse(url)) return false;
+  const { protocol, hostname } = new URL(url);
+  if (protocol !== "http:") return false;
+  const loopback =
+    hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
+  return !loopback;
+}

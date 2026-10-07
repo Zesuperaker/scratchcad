@@ -4,9 +4,10 @@ import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import express from "express";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as appModule from "../src/app.ts";
 import { createApp, errorHandler } from "../src/app.ts";
 import { ScratchcadClient } from "../src/client.ts";
@@ -16,6 +17,7 @@ import { FakeScratchcad, response, SCRIPT, TOOLS, tempDir, writeFile } from "./h
 
 const servers: http.Server[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const server of servers.splice(0)) {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
@@ -121,6 +123,31 @@ describe("file API", () => {
     expect(script.headers["x-version"]).toBe(
       listed.find((f: { kind: string }) => f.kind === "script").version,
     );
+  });
+
+  it("answers, or cuts the response off, when a file can't be read", async () => {
+    const { base, out } = await serve();
+    writeFile(path.join(out, "a.stl"), "solid", 1000);
+    const failing = (chunks: string[]) =>
+      new Readable({
+        read() {
+          const chunk = chunks.shift();
+          if (chunk !== undefined) this.push(chunk);
+          // Fail later, so what was pushed reaches the client first.
+          else
+            setTimeout(() => this.destroy(Object.assign(new Error("gone"), { code: "EIO" })), 20);
+        },
+      });
+    const open = vi.spyOn(fs, "createReadStream");
+
+    open.mockReturnValueOnce(failing([]) as fs.ReadStream);
+    const before = await raw(base, "GET", "/api/files/a.stl");
+    expect(before.status).toBe(404);
+    expect(before.json().error).toEqual({ code: "not_found", message: "a.stl could not be read" });
+
+    open.mockReturnValueOnce(failing(["sol"]) as fs.ReadStream);
+    const during = await raw(base, "GET", "/api/files/a.stl");
+    expect([during.status, during.text]).toEqual([200, "sol"]);
   });
 
   it.each([

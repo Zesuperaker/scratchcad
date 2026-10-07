@@ -6,6 +6,7 @@
 //   GET  /api/files/<path>          one file, with its version in x-version
 //   PUT  /api/files/<path>          write one, checking x-expected-version
 //   POST /api/scratchcad/v1/...     forwarded to scratchcad, token added here
+//   GET  /api/editor                the output directory this editor shows
 //   POST /mcp                       streamable HTTP MCP (HTTP mode)
 //   GET  /healthz                   liveness
 //
@@ -49,6 +50,8 @@ export interface AppOptions {
   allowedHosts: string[];
   /** Builds a fresh MCP server per request; omit to serve no /mcp. */
   mcp?: () => McpServer;
+  /** Whether the editor is served next to this app (answers /api/editor). */
+  editor?: boolean;
 }
 
 /** An error in the scratchcad service's format: {"error": {"code", "message"}}. */
@@ -61,7 +64,14 @@ function relativePath(params: Record<string, string | string[]>): string {
   return [params.path].flat().join("/");
 }
 
-export function createApp({ client, outputDir, host, allowedHosts, mcp }: AppOptions): Express {
+export function createApp({
+  client,
+  outputDir,
+  host,
+  allowedHosts,
+  mcp,
+  editor = false,
+}: AppOptions): Express {
   const app = createMcpExpressApp({ host, allowedHosts, jsonLimit: "8mb" });
   // createMcpExpressApp checks Origin only for loopback binds; check it always.
   app.use(originValidation(allowedHosts));
@@ -99,6 +109,14 @@ export function createApp({ client, outputDir, host, allowedHosts, mcp }: AppOpt
 
   // --- file API -------------------------------------------------------------
 
+  if (editor) {
+    // Lets another scratchcad-mcp that finds this port taken check whether
+    // this editor shows its files before sending users here.
+    app.get("/api/editor", (_req, res) => {
+      res.json({ outputDir: workspace.realpath(outputDir) });
+    });
+  }
+
   app.get("/api/files", async (_req, res) => {
     res.json(workspace.listFiles(outputDir));
   });
@@ -118,7 +136,14 @@ export function createApp({ client, outputDir, host, allowedHosts, mcp }: AppOpt
       "cache-control": "no-cache",
       "x-version": workspace.version(target),
     });
-    fs.createReadStream(target).pipe(res);
+    // The file can vanish or become unreadable after the isFile check; an
+    // unhandled stream error would take the whole process down.
+    const stream = fs.createReadStream(target);
+    stream.on("error", (error) => {
+      if (!res.headersSent) fail(res, 404, "not_found", `${relative} could not be read`);
+      else res.destroy(error);
+    });
+    stream.pipe(res);
   });
 
   app.put(

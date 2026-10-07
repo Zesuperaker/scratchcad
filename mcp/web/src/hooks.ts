@@ -92,8 +92,10 @@ export function usePreview(key: string | null, script: string | null, depth: num
       setPreview((p) =>
         p.key === key ? { ...p, running: true } : { ...EMPTY, key, running: true },
       );
+      // Kept for the catch: a script can validate and then fail to mesh.
+      let checked: Awaited<ReturnType<typeof validate>> | null = null;
       try {
-        const checked = await validate(script, signal);
+        checked = await validate(script, signal);
         const region = parseRegion(script) ?? DEFAULT_REGION;
         const result = await mesh(
           { script, center: region.center, halfSize: region.halfSize, depth },
@@ -120,7 +122,11 @@ export function usePreview(key: string | null, script: string | null, depth: num
           key,
           running: false,
           stale: p.stl !== null,
-          problems: [problem("error", message)],
+          nodes: checked ? checked.nodes : p.nodes,
+          problems: [
+            ...(checked?.output ?? []).map((line) => problem("info", line)),
+            problem("error", message),
+          ],
         }));
       }
     }, PREVIEW_DELAY_MS);

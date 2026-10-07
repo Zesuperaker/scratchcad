@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConfigError, settingsFromEnv } from "../src/config.ts";
+import { ConfigError, sendsTokenInCleartext, settingsFromEnv } from "../src/config.ts";
 
 describe("settingsFromEnv", () => {
   it("has defaults", () => {
@@ -87,5 +87,20 @@ describe("settingsFromEnv", () => {
   ])("rejects %s=%s", (name, value, reason) => {
     expect(() => settingsFromEnv({ [name]: value })).toThrow(ConfigError);
     expect(() => settingsFromEnv({ [name]: value })).toThrow(reason);
+  });
+});
+
+describe("sendsTokenInCleartext", () => {
+  it.each([
+    ["http://cad.example.com", "s3cret", true],
+    ["http://server:8080", "s3cret", true],
+    ["http://10.0.0.5:8080", "s3cret", true],
+    ["https://cad.example.com", "s3cret", false],
+    ["http://localhost:8080", "s3cret", false],
+    ["http://127.0.0.1:8080", "s3cret", false],
+    ["http://[::1]:8080", "s3cret", false],
+    ["http://cad.example.com", null, false],
+  ])("%s with token %s is %s", (url, apiToken, expected) => {
+    expect(sendsTokenInCleartext({ url, apiToken })).toBe(expected);
   });
 });

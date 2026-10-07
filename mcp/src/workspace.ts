@@ -90,14 +90,21 @@ export function entry(outputDir: string, target: string): Entry {
   };
 }
 
+// The output directory defaults to the client's working directory, often a
+// repository root, and the walk runs synchronously on a request: skip build
+// and dependency trees and stop at a sane depth so a listing stays quick.
+const SKIPPED_DIRS = new Set(["node_modules", "target"]);
+const MAX_DEPTH = 8;
+
 /**
- * Every script and mesh under the output directory, newest first. Hidden
- * directories are skipped, and so are symlinks that lead out of the directory.
+ * Every script and mesh under the output directory, newest first. Hidden,
+ * node_modules and target directories are skipped, as is anything nested more
+ * than MAX_DEPTH directories down and symlinks that lead out of the directory.
  */
 export function listFiles(outputDir: string): Entry[] {
   const root = realpath(outputDir);
   const entries: Entry[] = [];
-  const walk = (directory: string) => {
+  const walk = (directory: string, depth: number) => {
     let children: fs.Dirent[];
     try {
       children = fs.readdirSync(directory, { withFileTypes: true });
@@ -107,7 +114,8 @@ export function listFiles(outputDir: string): Entry[] {
     for (const child of children) {
       const full = path.join(directory, child.name);
       if (child.isDirectory()) {
-        if (!child.name.startsWith(".")) walk(full);
+        const skipped = child.name.startsWith(".") || SKIPPED_DIRS.has(child.name);
+        if (!skipped && depth < MAX_DEPTH) walk(full, depth + 1);
         continue;
       }
       let target: string;
@@ -119,7 +127,7 @@ export function listFiles(outputDir: string): Entry[] {
       if (isFile(target)) entries.push(entry(root, target));
     }
   };
-  walk(root);
+  walk(root, 0);
   return entries.sort((a, b) => b.modified - a.modified || a.path.localeCompare(b.path));
 }
 
