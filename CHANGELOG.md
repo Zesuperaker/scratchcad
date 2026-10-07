@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/Zesuperaker/scratchcad/compare/v0.2.0...v0.3.0) (2026-10-07)
+
+
+### Features
+
+* **mcp:** default editor preview and export detail to 10 ([#27](https://github.com/Zesuperaker/scratchcad/issues/27)) ([aebb94b](https://github.com/Zesuperaker/scratchcad/commit/aebb94b1c54e8f9e5cba6be3a440120e3bf0ce91))
+* **mcp:** port the MCP server to TypeScript with a built-in script editor ([#23](https://github.com/Zesuperaker/scratchcad/issues/23)) ([037590b](https://github.com/Zesuperaker/scratchcad/commit/037590bd58d180f393bddff2578e10417256de6f))
+
 ## [0.2.0](https://github.com/Zesuperaker/scratchcad/compare/v0.1.1...v0.2.0) (2026-10-04)
 
 
