@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "licenses": "node scripts/third-party-licenses.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",
