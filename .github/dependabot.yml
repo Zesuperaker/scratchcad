@@ -29,6 +29,10 @@ updates:
       # https://github.com/typescript-eslint/typescript-eslint/issues/10940
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # Keep Node's types on the major version CI and the dev image run, so
+      # typecheck rejects APIs newer than that runtime.
+      - dependency-name: "@types/node"
+        versions: [">=25"]
 
   - package-ecosystem: github-actions
     directory: /
