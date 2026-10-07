@@ -14,8 +14,9 @@ const nothing = async () => {};
 
 /**
  * Adds the editor to `app`. Returns a cleanup for the dev server, which also
- * runs when `server` closes: call it when `server` never started listening,
- * since it then never closes either.
+ * runs when `server` closes. Call it before closing `server` (Vite's HMR
+ * WebSockets would keep the close waiting) and when `server` never started
+ * listening, since it then never closes. Running it twice is safe.
  */
 export async function serveEditor(
   app: Express,
@@ -30,7 +31,8 @@ export async function serveEditor(
       server: { middlewareMode: true, hmr: { server } },
       appType: "spa",
     });
-    const close = () => vite.close();
+    let closing: Promise<void> | undefined;
+    const close = () => (closing ??= vite.close());
     server.on("close", () => void close());
     app.use(vite.middlewares);
     return close;

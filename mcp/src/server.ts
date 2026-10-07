@@ -83,6 +83,7 @@ export async function start(
     createMcpServer({ client, outputDir: settings.outputDir, editorUrl, version });
 
   let server: http.Server | null = null;
+  let closeEditor: (() => Promise<void>) | null = null;
   if (settings.transport === "http" || settings.editor) {
     const app = createApp({
       client,
@@ -93,7 +94,7 @@ export async function start(
       editor: settings.editor,
     });
     server = http.createServer(app);
-    const closeEditor = settings.editor ? await serveEditor(app, server, { dev }) : null;
+    if (settings.editor) closeEditor = await serveEditor(app, server, { dev });
     app.use(errorHandler);
     let shared = false;
     try {
@@ -146,6 +147,9 @@ export async function start(
     close: async () => {
       await stdio?.close();
       if (httpServer) {
+        // First, or its HMR WebSockets (which closeAllConnections leaves
+        // alone) keep httpServer.close() waiting forever.
+        await closeEditor?.();
         httpServer.closeAllConnections();
         await new Promise<void>((resolve) => httpServer.close(() => resolve()));
       }

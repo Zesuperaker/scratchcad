@@ -145,6 +145,21 @@ describe("start", () => {
     expect(s.editorUrl).toBeNull();
   });
 
+  it("shuts down with the dev editor's HMR socket still open", async () => {
+    const r = await start(testSettings({ transport: "http", editor: true }), {
+      dev: true,
+      log: () => {},
+      stdioTransport: unused,
+    });
+    const socket = new WebSocket(`ws://localhost:${port(r)}/`, "vite-hmr");
+    await new Promise((resolve, reject) => {
+      socket.onopen = resolve;
+      socket.onerror = reject;
+    });
+    // Before Vite was closed first, this waited on the socket forever.
+    await r.close();
+  });
+
   it("fails over HTTP when the port is taken", async () => {
     const taken = await takenPort();
     await expect(
