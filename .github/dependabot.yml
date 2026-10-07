@@ -12,7 +12,7 @@ updates:
       cargo-minor-patch:
         update-types: [minor, patch]
 
-  - package-ecosystem: uv
+  - package-ecosystem: npm
     directory: /mcp
     schedule:
       interval: weekly
@@ -21,8 +21,14 @@ updates:
       prefix-development: chore
       include: scope
     groups:
-      uv-minor-patch:
+      npm-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # Stay on TypeScript 6 until typescript-eslint supports TS 7, which
+      # ships without the compiler API it imports.
+      # https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

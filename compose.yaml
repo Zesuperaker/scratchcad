@@ -1,15 +1,22 @@
-# Local development stack: the scratchcad service plus the MCP server over HTTP.
+# Local development stack: the scratchcad service, and the MCP server with
+# the editor.
 #
 #   docker compose up --build          # start both
 #   docker compose watch               # start both and reload on source changes
 #
 # Then point an MCP client at http://localhost:8000/mcp, e.g.
 #   claude mcp add --transport http scratchcad http://localhost:8000/mcp
-# STL files the model exports appear in ./output.
+# and open the editor at http://localhost:8000. The scripts the model saves
+# (and any STL files) are in ./output.
+#
+# The scratchcad service doesn't have to run here: the MCP server only needs
+# its URL. To use one elsewhere, run `docker compose up --no-deps mcp` with
+# SCRATCHCAD_URL set in .env, or run the MCP server without Docker (see
+# mcp/README.md).
 #
 # Both ports are published on 127.0.0.1 only. The service runs without an API
 # token unless you put SCRATCHCAD_API_TOKEN=<16+ characters> in a .env file next
-# to this one; both containers read it.
+# to this one; every container reads it.
 
 name: scratchcad
 
@@ -44,23 +51,32 @@ services:
       - "127.0.0.1:8000:8000"
     env_file: *env
     environment:
-      SCRATCHCAD_URL: http://server:8080
+      SCRATCHCAD_URL: ${SCRATCHCAD_URL:-http://server:8080}
     volumes:
       - ./output:/output
     depends_on:
       server:
         condition: service_healthy
+        required: false
     develop:
       watch:
+        # Node restarts on server changes and Vite hot-reloads the editor,
+        # so syncing the files is enough.
         - path: ./mcp/src
           target: /app/src
-          action: sync+restart
+          action: sync
+        - path: ./mcp/web
+          target: /app/web
+          action: sync
         - path: ./mcp/tests
           target: /app/tests
           action: sync
-        - path: ./mcp/pyproject.toml
+        - path: ./mcp/vite.config.ts
+          target: /app/vite.config.ts
+          action: sync+restart
+        - path: ./mcp/package.json
           action: rebuild
-        - path: ./mcp/uv.lock
+        - path: ./mcp/package-lock.json
           action: rebuild
 
 volumes:

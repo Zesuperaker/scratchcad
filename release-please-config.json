@@ -2,7 +2,24 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "extra-files": ["README.md"]
+      "extra-files": [
+        "README.md",
+        {
+          "type": "json",
+          "path": "mcp/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "mcp/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "mcp/package-lock.json",
+          "jsonpath": "$.packages[''].version"
+        }
+      ]
     }
   }
 }
