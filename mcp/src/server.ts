@@ -37,9 +37,11 @@ export function packageVersion(root = packageRoot()): string {
   return (JSON.parse(fs.readFileSync(file, "utf8")) as { version: string }).version;
 }
 
-/** How the editor's address reads in a browser on this machine. */
+/** How the editor's host reads in a URL in a browser on this machine. */
 export function browserHost(host: string): string {
-  return host === "0.0.0.0" || host === "::" || host === "127.0.0.1" ? "localhost" : host;
+  if (host === "0.0.0.0" || host === "::" || host === "127.0.0.1") return "localhost";
+  // An IPv6 literal needs brackets to be told apart from the port.
+  return host.includes(":") ? `[${host}]` : host;
 }
 
 /**
@@ -91,12 +93,14 @@ export async function start(
       editor: settings.editor,
     });
     server = http.createServer(app);
-    if (settings.editor) await serveEditor(app, server, { dev });
+    const closeEditor = settings.editor ? await serveEditor(app, server, { dev }) : null;
     app.use(errorHandler);
     let shared = false;
     try {
       await listen(server, settings.port, settings.host);
     } catch (error) {
+      // A server that never listened never closes, so stop Vite here.
+      await closeEditor?.();
       const inUse = (error as NodeJS.ErrnoException).code === "EADDRINUSE";
       if (!(inUse && settings.transport === "stdio")) throw error;
       server = null;

@@ -164,6 +164,9 @@ describe("helpers", () => {
     ["::", "localhost"],
     ["127.0.0.1", "localhost"],
     ["192.168.1.5", "192.168.1.5"],
+    ["::1", "[::1]"],
+    ["fe80::1", "[fe80::1]"],
+    ["cad.local", "cad.local"],
   ])("browserHost(%s) is %s", (host, expected) => {
     expect(browserHost(host)).toBe(expected);
   });

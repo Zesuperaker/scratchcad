@@ -36,7 +36,7 @@ async function serve(
     mcp?: boolean;
     host?: string;
     allowedHosts?: string[];
-    editor?: (app: express.Express, server: http.Server) => Promise<void>;
+    editor?: (app: express.Express, server: http.Server) => Promise<unknown>;
   } = {},
 ): Promise<Served> {
   const fake = new FakeScratchcad();
