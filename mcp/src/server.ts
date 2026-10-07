@@ -135,24 +135,28 @@ export async function start(
   }
 
   let stdio: ReturnType<typeof makeServer> | null = null;
+  const httpServer = server;
+  const close = async () => {
+    await stdio?.close();
+    if (httpServer) {
+      // First, or its HMR WebSockets (which closeAllConnections leaves
+      // alone) keep httpServer.close() waiting forever.
+      await closeEditor?.();
+      httpServer.closeAllConnections();
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+  };
   if (settings.transport === "stdio") {
     stdio = makeServer();
-    await stdio.connect(stdioTransport());
+    try {
+      await stdio.connect(stdioTransport());
+    } catch (error) {
+      // The caller gets no Running to close, so don't leave the editor up.
+      // The MCP server never connected: there is nothing of it to close.
+      stdio = null;
+      await close();
+      throw error;
+    }
   }
-
-  const httpServer = server;
-  return {
-    http: httpServer,
-    editorUrl,
-    close: async () => {
-      await stdio?.close();
-      if (httpServer) {
-        // First, or its HMR WebSockets (which closeAllConnections leaves
-        // alone) keep httpServer.close() waiting forever.
-        await closeEditor?.();
-        httpServer.closeAllConnections();
-        await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-      }
-    },
-  };
+  return { http: httpServer, editorUrl, close };
 }

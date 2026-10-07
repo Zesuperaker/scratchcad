@@ -3,7 +3,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { InMemoryTransport, type Transport } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { packageRoot } from "../src/paths.ts";
 import { browserHost, packageVersion, type Running, start } from "../src/server.ts";
@@ -158,6 +158,23 @@ describe("start", () => {
     });
     // Before Vite was closed first, this waited on the socket forever.
     await r.close();
+  });
+
+  it("closes the editor again when the stdio transport fails to start", async () => {
+    const failing = { start: () => Promise.reject(new Error("no stdio")) } as unknown as Transport;
+    // A port that was free a moment ago, so both starts below use the same one.
+    const free = await takenPort();
+    await new Promise((resolve) => blockers.pop()!.close(resolve));
+    const settings = testSettings({ editor: true, port: free });
+    await expect(start(settings, { log: () => {}, stdioTransport: () => failing })).rejects.toThrow(
+      "no stdio",
+    );
+    // The port is free again: a second start serves the editor on it.
+    const r = await launch(settings, {
+      log: () => {},
+      stdioTransport: () => InMemoryTransport.createLinkedPair()[0],
+    });
+    expect(port(r)).toBe(free);
   });
 
   it("fails over HTTP when the port is taken", async () => {
