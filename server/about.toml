@@ -1,5 +1,5 @@
 # Configuration for `cargo about`, which generates the Rust section of
-# ../THIRD_PARTY_LICENSES.txt; see ../scripts/third_party_licenses.py.
+# ../THIRD_PARTY_LICENSES.txt; see ../mcp/scripts/third-party-licenses.ts.
 # Generation fails if a dependency uses a license not listed here, so a new
 # license (e.g. GPL) gets a deliberate review before it ships.
 accepted = [

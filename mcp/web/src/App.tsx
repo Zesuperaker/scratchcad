@@ -43,8 +43,8 @@ export default function App() {
   const [drawer, setDrawer] = useState<"files" | null>("files");
   // The right-hand panel shows the sliders, or the script in their place.
   const [panel, setPanel] = useState<"sliders" | "script">("sliders");
-  const [previewDepth, setPreviewDepth] = useState(7);
-  const [exportDepth, setExportDepth] = useState(8);
+  const [previewDepth, setPreviewDepth] = useState(10);
+  const [exportDepth, setExportDepth] = useState(10);
   const [exporting, setExporting] = useState(false);
   // Where the script editor should put the cursor when it next opens.
   const [reveal, setReveal] = useState<{ line: number; column: number; key: number } | null>(null);
