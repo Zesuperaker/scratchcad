@@ -7,7 +7,7 @@
 # run in it too:
 #   docker compose run --rm mcp npm test
 
-FROM node:24-slim
+FROM node:25-slim
 
 WORKDIR /app
 ENV SCRATCHCAD_MCP_TRANSPORT=http \
